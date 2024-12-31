@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 #from core.mixins import CacheResponseMixin
-from core.permissions import IsAuthor, IsFileAuthor
+from core.permissions import IsBookCreator, IsFileAuthor, PublicOrPrivate
 from scripts.pdf_converter import PdfExtractor
 
 from .filters import BookFileFilter
@@ -21,7 +21,7 @@ from .serializers import BookFileSerializer, BookSerializer
 class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     queryset = Book.objects.all()
     serializer_class = BookSerializer
-    pagination_class = pagination.PageNumberPagination
+    pagination_class = pagination.LimitOffsetPagination
     permission_class = [permissions.AllowAny]
     filterset_fields = ["title", "author", "created_at", "updated_at"]
     search_fields = ["title", "author", "description"]
@@ -40,7 +40,7 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         if self.action in ['list', 'retrieve']:
             permission_classes = [permissions.AllowAny]
         else:
-            permission_classes = [permissions.IsAuthenticated]
+            permission_classes = [IsBookCreator]
         return [permission() for permission in permission_classes]
 
 
@@ -51,7 +51,7 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     @extend_schema(
             parameters=[OpenApiParameter("page", type=int, description="the pdf page to be displayed")]
     )
-    @action(detail=True, methods=['get'], url_path="read-page", url_name="read_page", permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=['get'], url_path="read-page", url_name="read_page", permission_classes=[PublicOrPrivate])
     def read_one_page(self, request, pk=None):
 
         page_number=request.query_params.get('page')
@@ -72,7 +72,7 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         return page
      
 
-    @action(detail=True, methods=['get'], url_path="pages", url_name="all_page", permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=['get'], url_path="pages", url_name="all_page", permission_classes=[PublicOrPrivate])
     def read_all_pages(self, request, pk=None, *args, **kwargs):
 
 
@@ -93,7 +93,7 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
 class BookFileViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     queryset = BookFile.objects.all()
     serializer_class = BookFileSerializer
-    pagination_class = pagination.PageNumberPagination
+    pagination_class = pagination.LimitOffsetPagination
     permission_class = [permissions.AllowAny]
 
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]

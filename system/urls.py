@@ -28,10 +28,6 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 urlpatterns = [
     path("admin/", admin.site.urls),
 
-    #path("accounts/", include("allauth.urls")),
-    #path('rest-auth/', include('dj_rest_auth.urls')),
-    #path('rest-auth/registration/', include('dj_rest_auth.registration.urls')),
-
     path("login/", TokenObtainPairView.as_view(), name='login'),
     path('token/refresh/', TokenRefreshView.as_view(permission_classes = [permissions.AllowAny]), name='token_refresh'),
     path('token/verify/', TokenVerifyView.as_view(permission_classes = [permissions.AllowAny]), name='token_verify'),

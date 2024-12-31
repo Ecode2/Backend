@@ -1,12 +1,14 @@
 from django.db import models
 from django.conf import settings
+from enum import Enum
 
-PUBLIC = "public"
-PRIVATE = "private"
+class BookStatus(Enum):
+    PUBLIC = "public"
+    PRIVATE = "private"
 
 BOOK_STATUS = [
-    (PUBLIC, "Public"),
-    (PRIVATE, "Private"),
+    (BookStatus.PUBLIC, "Public"),
+    (BookStatus.PRIVATE, "Private"),
 ]
 
 
@@ -22,7 +24,7 @@ class Book(models.Model):
     author = models.CharField(max_length=255, blank=True, null=True)
 
     production_year = models.IntegerField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=BOOK_STATUS, default=PRIVATE)
+    status = models.CharField(max_length=20, choices=BOOK_STATUS, default=BookStatus.PRIVATE)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

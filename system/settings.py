@@ -12,46 +12,26 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
-import os, logging
-from decouple import config, Csv
-import rest_framework.pagination
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-""" LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'file': {
-            'level': 'DEBUG',
-            'class': 'logging.FileHandler',
-            'filename': 'debug.log'
-        },
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['file'],
-            'level': 'DEBUG',
-            'propagate': True
-        }
-    }
-} """
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config("SECRET_KEY")
+SECRET_KEY = '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f' #config("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-if config("DEBUG", default=False, cast=bool) == False:
-    DEBUG = config("DEBUG", default=False, cast=bool)
+if os.getenv("DEBUG", default=False) == False:
+    DEBUG = os.getenv("DEBUG", default=False)
     
-    ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="", cast=Csv())
+    ALLOWED_HOSTS = [os.getenv("ALLOWED_HOSTS", default="")]
 
-    CSRF_TRUSTED_ORIGINS = [config("CSRF_TRUSTED_ORIGINS", default="", cast=str)]
+    CSRF_TRUSTED_ORIGINS = [os.getenv("CSRF_TRUSTED_ORIGINS", default="")]
 
     SECURE_SSL_REDIRECT=False
 
@@ -140,11 +120,11 @@ if not DEBUG:
     DATABASES = {
        "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": config("DB_NAME"),
-            "USER": config("DB_USER"),
-            "PASSWORD": config("DB_PASSWORD"),
-            "HOST": config("DB_HOST"),
-            "PORT": config("DB_PORT"),
+            "NAME": os.getenv("DB_NAME"),
+            "USER": os.getenv("DB_USER"),
+            "PASSWORD": os.getenv("DB_PASSWORD"),
+            "HOST": os.getenv("DB_HOST"),
+            "PORT": os.getenv("DB_PORT"),
         }
     }
 else:
@@ -196,7 +176,7 @@ MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / "media"
 
 if not DEBUG:
-    STATIC_ROOT = BASE_DIR / 'staticfiles'
+    STATIC_ROOT = os.path.join(BASE_DIR / 'staticfiles')
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
     MEDIA_ROOT = BASE_DIR / "mediafiles"
