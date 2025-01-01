@@ -1,6 +1,4 @@
 from rest_framework.permissions import BasePermission
-from bookshelf.models import BookStatus
-
 
 class IsAdminUser(BasePermission):
     def has_permission(self, request, view):
@@ -40,7 +38,10 @@ class IsBookCreator(BasePermission):
   
 class PublicOrPrivate(BasePermission):
     def has_object_permission(self, request, view, obj):
-        if obj.status == BookStatus.PUBLIC:
+        if obj.status == "public":
             return True
-        elif obj.status == BookStatus.PRIVATE:
+        elif obj.status == "private":
             return request.user == obj.user
+        
+    def has_permission(self, request, view):
+        return True

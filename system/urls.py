@@ -27,13 +27,12 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("auth/", include("auth.urls")),
 
-    path("login/", TokenObtainPairView.as_view(), name='login'),
-    path('token/refresh/', TokenRefreshView.as_view(permission_classes = [permissions.AllowAny]), name='token_refresh'),
-    path('token/verify/', TokenVerifyView.as_view(permission_classes = [permissions.AllowAny]), name='token_verify'),
-
-    path("", include("bookshelf.urls")),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+
+    path("", include("bookshelf.urls")),
+
 ]

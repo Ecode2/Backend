@@ -17,7 +17,7 @@ class BookSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Book
-        fields = ["id", "title", "description", "user", "author", "production_year", "status", "updated_at", "created_at", 'book_cover'] #, 'pdf_contents']
+        fields = ["id", "title", "description", "user", "author", "production_year", "status", "total_page", "updated_at", "created_at", 'book_cover'] #, 'pdf_contents']
         read_only_fields = ["id", "created_at"]
 
 
@@ -59,3 +59,16 @@ class BookFileSerializer(serializers.ModelSerializer):
         model = BookFile
         fields = ["id", "book", "file"]
         read_only_fields = ["id"]
+
+    def create(self, validated_data):
+        response = super().create(validated_data)
+        
+        first_file = BookFile.objects.get(book=validated_data["book"])
+
+        if first_file:
+            pdf_processor = PdfExtractor(first_file.file.path)
+            total_page = pdf_processor.get_total_page_number()
+            first_file.book.total_page = total_page
+
+        return response
+     
