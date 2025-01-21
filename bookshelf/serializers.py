@@ -1,7 +1,3 @@
-import base64
-from io import BytesIO
-
-from django.contrib.auth.models import User
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 
@@ -12,39 +8,16 @@ from .models import Book, BookFile
 
 class BookSerializer(serializers.ModelSerializer):
     book_cover = serializers.SerializerMethodField()
-    #pdf_contents = serializers.SerializerMethodField()
     user = serializers.StringRelatedField()
 
     class Meta:
         model = Book
-        fields = ["id", "title", "description", "user", "author", "production_year", "status", "total_page", "updated_at", "created_at", 'book_cover'] #, 'pdf_contents']
+        fields = ["id", "title", "description", "user", "author", "production_year", "status", "total_page", "updated_at", "created_at", 'book_cover']
         read_only_fields = ["id", "created_at"]
 
 
     def get_book_cover(self, obj):
-
-        first_file = obj.files.first()
-
-        if first_file:
-            pdf_processor = PdfExtractor(first_file.file.path)
-            img = pdf_processor.get_fist_page_image()
-
-            buffered = BytesIO()
-            img.save(buffered, format='WEBP')
-            buffered.seek(0)
-
-            img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return f'data:image/webp;base64,{img_base64}'
-        return None
-    
-    """
-    def get_pdf_contents(self, obj):
-        first_file = obj.files.first()
-
-        if first_file:
-            pdf_processor = PdfExtractor(first_file.file.path)
-            return pdf_processor.get_all_pages()
-        return None """
+        return obj.get_book_cover()
     
 
 
@@ -62,13 +35,7 @@ class BookFileSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         response = super().create(validated_data)
-        
-        first_file = BookFile.objects.get(book=validated_data["book"])
-
-        if first_file:
-            pdf_processor = PdfExtractor(first_file.file.path)
-            total_page = pdf_processor.get_total_page_number()
-            first_file.book.total_page = total_page
+        response.book.update_total_pages()
 
         return response
      

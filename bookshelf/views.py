@@ -23,8 +23,8 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     serializer_class = BookSerializer
     pagination_class = pagination.LimitOffsetPagination
     permission_class = [permissions.AllowAny]
-    filterset_fields = ["title", "author", "created_at", "updated_at"]
-    search_fields = ["title", "author", "description"]
+    filterset_fields = ["title", "author", "created_at", "updated_at", "status"]
+    search_fields = ["title", "author", "description", "status"]
     ordering_fields = ["title", "production_year", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
@@ -112,5 +112,13 @@ class BookFileViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         if self.action in ['list', 'retrieve']:
             permission_classes = [permissions.AllowAny]
         else:
-            permission_classes = [IsFileAuthor]  #, permissions.IsAuthenticated]
+            permission_classes = [permissions.AllowAny]  #, permissions.IsAuthenticated]
         return [permission() for permission in permission_classes]
+
+""" {
+  "title": "Harry Potter and the Prisoner of Azkaban",
+  "description": "Harry Potter and the Prisoner of Azkaban is the third novel in the Harry Potter franchise written by JK Rowling from 1997 to 2007 ",
+  "author": "JK Rowling",
+  "production_year": 2004,
+  "status": "private"
+} """

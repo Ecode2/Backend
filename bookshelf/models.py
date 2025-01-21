@@ -1,5 +1,9 @@
+import base64
+from io import BytesIO
 from django.db import models
 from django.conf import settings
+
+from scripts.pdf_converter import PdfExtractor
 
 PUBLIC = "public"
 PRIVATE = "private"
@@ -24,22 +28,37 @@ class Book(models.Model):
     production_year = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=BOOK_STATUS, default=PRIVATE)
 
-    total_page = models.IntegerField(null=True, blank=True)
+    total_page = models.IntegerField(null=True, blank=True, default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
-# TODO: make a model for the book cover image.
-# Just get a screen shot of the first page of the file
+    def update_total_pages(self):
+        first_file = self.files.first()
+        if first_file:
+            pdf_processor = PdfExtractor(first_file.file.path)
+            self.total_page = pdf_processor.get_total_page_number()
+            self.save()
 
-""" class BookCover(models.Model):
-    book = models.ForeignKey(Book, related_name='files', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to=None, height_field=None, width_field=None, max_length=100) """
+    def get_book_cover(self):
+        first_file = self.files.first()
+
+        if first_file:
+            pdf_processor = PdfExtractor(first_file.file.path)
+            img = pdf_processor.get_fist_page_image()
+
+            buffered = BytesIO()
+            img.save(buffered, format='WEBP')
+            buffered.seek(0)
+
+            img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            return f'data:image/webp;base64,{img_base64}'
+        return None
 
 
 def handle_file_upload(instance, filename):
-    return f"books/{instance.book.title}/{filename}"
+    return f"books/{instance.book.id}/{filename}"
 
 
 class BookFile(models.Model):
