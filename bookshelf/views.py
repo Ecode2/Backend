@@ -22,7 +22,8 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     queryset = Book.objects.all()
     serializer_class = BookSerializer
     pagination_class = pagination.LimitOffsetPagination
-    permission_class = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny]
+
     filterset_fields = ["title", "author", "created_at", "updated_at", "status"]
     search_fields = ["title", "author", "description", "status"]
     ordering_fields = ["title", "production_year", "created_at", "updated_at"]
@@ -37,21 +38,22 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         return Book.objects.filter(status="public")
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [IsBookCreator]
-        return [permission() for permission in permission_classes]
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsBookCreator()]
+
+        elif self.action in ["read_page", "all_page"]:
+            return [PublicOrPrivate()]
+
+        return super().get_permissions()
 
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
-        #return super().perform_create(serializer)
 
     @extend_schema(
             parameters=[OpenApiParameter("page", type=int, description="the pdf page to be displayed")]
     )
-    @action(detail=True, methods=['get'], url_path="read-page", url_name="read_page", permission_classes=[PublicOrPrivate])
+    @action(detail=True, methods=['get'], url_path="read-page", url_name="read_page")
     def read_one_page(self, request, pk=None):
 
         page_number=request.query_params.get('page')
@@ -72,7 +74,7 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         return page
      
 
-    @action(detail=True, methods=['get'], url_path="pages", url_name="all_page", permission_classes=[PublicOrPrivate])
+    @action(detail=True, methods=['get'], url_path="pages", url_name="all_page", permission_classes=[permissions.AllowAny])
     def read_all_pages(self, request, pk=None, *args, **kwargs):
 
 
@@ -109,11 +111,10 @@ class BookFileViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         return BookFile.objects.filter(book__status="public")
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [permissions.AllowAny]  #, permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsFileAuthor()]
+
+        return super().get_permissions()
 
 """ {
   "title": "Harry Potter and the Prisoner of Azkaban",

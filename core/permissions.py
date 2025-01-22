@@ -33,15 +33,17 @@ class IsFileAuthor(BasePermission):
 
 class IsBookCreator(BasePermission):
     def has_object_permission(self, request, view, obj):
-        return request.user.is_superuser or request.user == obj.user
+
+        if request.method in ("PATCH", "PUT", "DELETE"):
+            return request.user.is_superuser or obj.user == request.user
+        
+        return True
 
   
 class PublicOrPrivate(BasePermission):
     def has_object_permission(self, request, view, obj):
+
         if obj.status == "public":
             return True
-        elif obj.status == "private":
-            return request.user == obj.user
         
-    def has_permission(self, request, view):
-        return True
+        return obj.user == request.user
