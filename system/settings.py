@@ -29,10 +29,14 @@ SECRET_KEY = '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f' #config("SEC
 if os.getenv("DEBUG", default=False) == False:
     DEBUG = os.getenv("DEBUG", default=False)
     
-    ALLOWED_HOSTS = [os.getenv("ALLOWED_HOSTS", default="")]
+    allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
+    ALLOWED_HOSTS = allowed_host
 
-    CSRF_TRUSTED_ORIGINS = [os.getenv("CSRF_TRUSTED_ORIGINS", default="")]
-    CORS_ALLOWED_ORIGINS = [os.getenv("CORS_ALLOWED_ORIGINS", default=""),]
+    csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", default="").strip().split(",")
+    CSRF_TRUSTED_ORIGINS = csrf_origins
+
+    cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", default="").strip().split(",")
+    CORS_ALLOWED_ORIGINS = cors_origins
 
     SECURE_SSL_REDIRECT=False
 
@@ -205,7 +209,7 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": ['django_filters.rest_framework.DjangoFilterBackend'],
 
     'DEFAULT_PAGINATION_CLASS': "rest_framework.pagination.LimitOffsetPagination",
-    'PAGE_SIZE': 10,
+    'PAGE_SIZE': 50,
 
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 
@@ -214,7 +218,7 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "UPDATE_LAST_LOGIN": True,
 }
 
