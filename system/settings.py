@@ -17,7 +17,7 @@ import os
 
 import dj_database_url
 
-load_dotenv()
+load_dotenv(override=True)
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -33,46 +33,29 @@ SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[
 DEBUG = False
 
 if DEBUG == False:
-    print(os.getenv("DEBUG"))
     
-
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
-    ALLOWED_HOSTS = allowed_host[:-1]
-    print(allowed_host)
+    ALLOWED_HOSTS = allowed_host[:-1] if allowed_host[-1] == "" else allowed_host
+    print(ALLOWED_HOSTS)
 
-    csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", default="").strip().split(",")
-    CSRF_TRUSTED_ORIGINS = csrf_origins[:-1]
-    print(csrf_origins)
+    """ csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", default="").strip().split(",")
+    CSRF_TRUSTED_ORIGINS = csrf_origins[:-1] if csrf_origins[-1] == "" else csrf_origins"""
 
     cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", default="").strip().split(",")
-    CORS_ALLOWED_ORIGINS = cors_origins[:-1]
-    print(cors_origins)
+    CORS_ALLOWED_ORIGINS = cors_origins[:-1] if cors_origins[-1] == "" else cors_origins
+    print(CORS_ALLOWED_ORIGINS)
 
-    SECURE_SSL_REDIRECT=False
-
-    SECURE_HSTS_INCLUDE_SUBDOMAINS=True
-
-    SECURE_HSTS_SECONDS=30
-
-    SESSION_COOKIE_SECURE=True
-
-    CSRF_COOKIE_SECURE=True
-
-    SECURE_HSTS_PRELOAD=True
-
-    SECURE_BROWSER_XSS_FILTER=True
-
-    X_FRAME_OPTIONS='DENY'
+    # Allow all HTTP methods and headers
+    CORS_ALLOW_METHODS = ["*"]
+    CORS_ALLOW_HEADERS = ["*"]
+    CORS_ALLOW_CREDENTIALS = True
 
 else:
     DEBUG = True
-    print("/n/n/n",DEBUG,os.getenv("DEBUG"))
 
     ALLOWED_HOSTS = ["*"]
 
     CORS_ALLOW_ALL_ORIGINS = True
-    #CORS_ALLOWED_ORIGINS = ["http://127.0.0.1:3000", "http://localhost:3000", "http://172.20.10.5:3000"]
-
     #CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:3000", "http://localhost:3000"]
 
 
@@ -105,10 +88,10 @@ INSTALLED_APPS = [
 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    'corsheaders.middleware.CorsMiddleware',
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -143,18 +126,18 @@ WSGI_APPLICATION = "system.wsgi.application"
 if os.getenv("DATABASE_URL"):
     print("/n/n postgres",os.getenv("DATABASE_URL"))
     DATABASES = {
-       'default': dj_database_url.config(default=os.getenv("DATABASE_URL"),
-                                          conn_max_age=600,
-                                          ssl_require=True,
-                                          conn_health_checks=True)
+        'default': dj_database_url.config(default=os.getenv("DATABASE_URL"),
+                                            conn_max_age=600,
+                                            ssl_require=True,
+                                            conn_health_checks=True)
     }
 else:
     print("/n/n sqlite 3")
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
     }
 
 
@@ -224,9 +207,9 @@ REST_FRAMEWORK = {
 
     'TEST_REQUEST_DEFAULT_FORMAT': 'json',
 
-    'DEFAULT_RENDERER_CLASSES': (
-        'rest_framework.renderers.JSONRenderer',
-    ),
+    #'DEFAULT_RENDERER_CLASSES': (
+    #    'rest_framework.renderers.JSONRenderer',
+    #),
 }
 
 SIMPLE_JWT = {
