@@ -133,7 +133,8 @@ WSGI_APPLICATION = "system.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-if DEBUG == False and os.getenv("DATABASE_URL"):
+if os.getenv("DATABASE_URL"):
+    print("/n/n postgres",os.getenv("DATABASE_URL"))
     DATABASES = {
        'default': dj_database_url.config(default=os.getenv("DATABASE_URL"),
                                           conn_max_age=600,
@@ -141,6 +142,7 @@ if DEBUG == False and os.getenv("DATABASE_URL"):
                                           conn_health_checks=True)
     }
 else:
+    print("/n/n sqlite 3")
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
