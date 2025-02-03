@@ -30,9 +30,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f')
 
 # SECURITY WARNING: don't run with debug turned on in 
-DEBUG = False
+DEBUG = True
 
-if DEBUG == False:
+if DEBUG == True:
     
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
     ALLOWED_HOSTS = allowed_host[:-1] if allowed_host[-1] == "" else allowed_host
@@ -123,7 +123,7 @@ WSGI_APPLICATION = "system.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-if os.getenv("DATABASE_URL"):
+if DEBUG and os.getenv("DATABASE_URL"):
     print("/n/n postgres",os.getenv("DATABASE_URL"))
     DATABASES = {
         'default': dj_database_url.config(default=os.getenv("DATABASE_URL"),
