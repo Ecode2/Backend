@@ -59,7 +59,7 @@ if os.getenv("DEBUG", default=False) == False:
 
 else:
     DEBUG = True
-    print("/n/n/n",DEBUG)
+    print("/n/n/n",DEBUG,os.getenv("DEBUG"))
 
     ALLOWED_HOSTS = ["*"]
 
