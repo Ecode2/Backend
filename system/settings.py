@@ -12,10 +12,12 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
+from dotenv import load_dotenv
 import os
 
 import dj_database_url
 
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -31,17 +33,20 @@ SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[
 DEBUG = False
 
 if DEBUG == False:
-    print("/n/n/n",os.getenv("DEBUG"))
+    print(os.getenv("DEBUG"))
     
 
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
     ALLOWED_HOSTS = allowed_host
+    print(allowed_host)
 
     csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", default="").strip().split(",")
     CSRF_TRUSTED_ORIGINS = csrf_origins
+    print(csrf_origins)
 
     cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", default="").strip().split(",")
     CORS_ALLOWED_ORIGINS = cors_origins
+    print(cors_origins)
 
     SECURE_SSL_REDIRECT=False
 
