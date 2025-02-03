@@ -25,11 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f' #config("SECRET_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if os.getenv("DEBUG", default=False) == False:
-    DEBUG = os.getenv("DEBUG", default=False)
+    print("/n/n/n",os.getenv("DEBUG"))
+    DEBUG = False
     
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
     ALLOWED_HOSTS = allowed_host
@@ -58,6 +59,7 @@ if os.getenv("DEBUG", default=False) == False:
 
 else:
     DEBUG = True
+    print("/n/n/n",DEBUG)
 
     ALLOWED_HOSTS = ["*"]
 
@@ -212,6 +214,10 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 
     'TEST_REQUEST_DEFAULT_FORMAT': 'json',
+
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
 }
 
 SIMPLE_JWT = {
