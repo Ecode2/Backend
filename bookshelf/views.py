@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 #from core.mixins import CacheResponseMixin
-from core.permissions import IsBookCreator, IsFileAuthor, PublicOrPrivate
+from permissions import IsBookCreator, IsFileAuthor, PublicOrPrivate
 from scripts.pdf_converter import PdfExtractor
 
 from .filters import BookFileFilter

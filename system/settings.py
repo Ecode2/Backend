@@ -30,20 +30,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f')
 
 # SECURITY WARNING: don't run with debug turned on in 
-DEBUG = True
+DEBUG = os.getenv("DEBUG", False)
 
-if DEBUG == True:
+if DEBUG == False:
     
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
     ALLOWED_HOSTS = allowed_host[:-1] if allowed_host[-1] == "" else allowed_host
-    print(ALLOWED_HOSTS)
 
     """ csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", default="").strip().split(",")
     CSRF_TRUSTED_ORIGINS = csrf_origins[:-1] if csrf_origins[-1] == "" else csrf_origins"""
 
     cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", default="").strip().split(",")
     CORS_ALLOWED_ORIGINS = cors_origins[:-1] if cors_origins[-1] == "" else cors_origins
-    print(CORS_ALLOWED_ORIGINS)
 
     # Allow all HTTP methods and headers
     CORS_ALLOW_METHODS = ["*"]
@@ -123,8 +121,7 @@ WSGI_APPLICATION = "system.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-if DEBUG and os.getenv("DATABASE_URL"):
-    print("/n/n postgres",os.getenv("DATABASE_URL"))
+if not DEBUG and os.getenv("DATABASE_URL"):
     DATABASES = {
         'default': dj_database_url.config(default=os.getenv("DATABASE_URL"),
                                             conn_max_age=600,
@@ -132,7 +129,6 @@ if DEBUG and os.getenv("DATABASE_URL"):
                                             conn_health_checks=True)
     }
 else:
-    print("/n/n sqlite 3")
     DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -183,8 +179,6 @@ MEDIA_ROOT = BASE_DIR / "media"
 if not DEBUG:
     STATIC_ROOT = os.path.join(BASE_DIR / 'staticfiles')
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-    MEDIA_ROOT = BASE_DIR / "mediafiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
