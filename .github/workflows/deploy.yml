@@ -3,7 +3,7 @@ name: CI/CD Pipeline for BookVerse
 on:
     push:
         branches:
-            -main
+            - main
 
 jobs:
     deploy:
