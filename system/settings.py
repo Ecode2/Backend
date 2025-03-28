@@ -30,7 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f')
 
 # SECURITY WARNING: don't run with debug turned on in 
-DEBUG = os.getenv("DEBUG", True)
+DEBUG = os.getenv("DEBUG", False)
 
 if DEBUG == False:
     
