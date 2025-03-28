@@ -10,6 +10,8 @@ jobs:
         name: Deploy BookVerse to Heroku
         runs-on: ubuntu-latest
         if: github.ref == 'refs/heads/main'
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
 
         steps:
             - name: Checkout Repository
@@ -21,13 +23,6 @@ jobs:
                 curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
                 heroku --version
               # Installs the Heroku CLI for command-line access.
-
-            - name: Login to Heroku
-              env:
-                HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-              run: |
-                echo $HEROKU_API_KEY | heroku login --api-key
-              # Authenticates with Heroku using your API key stored in GitHub Secrets.
 
             - name: Add Heroku Remote
               run: |
