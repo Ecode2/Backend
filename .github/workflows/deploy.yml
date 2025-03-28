@@ -24,9 +24,13 @@ jobs:
                 heroku --version
               # Installs the Heroku CLI for command-line access.
 
-            - name: Add Heroku Remote
+            - name: Set Heroku Remote with API Key
               run: |
-                heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
+                git remote add heroku https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git
+
+            #- name: Add Heroku Remote
+              #run: |
+                #fixed deheroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
               # Links your repository to your Heroku app.
 
             - name: Push to Heroku
