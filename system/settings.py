@@ -32,8 +32,13 @@ SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[
 # SECURITY WARNING: don't run with debug turned on in 
 DEBUG = os.getenv("DEBUG", False)
 
-if DEBUG == False:
-    
+if DEBUG is True:
+    ALLOWED_HOSTS = ["*"]
+
+    CORS_ALLOW_ALL_ORIGINS = True
+    #CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:3000", "http://localhost:3000"]
+
+else:
     allowed_host = os.getenv("ALLOWED_HOSTS", default="").strip().split(",")
     ALLOWED_HOSTS = allowed_host[:-1] if allowed_host[-1] == "" else allowed_host
 
@@ -47,14 +52,6 @@ if DEBUG == False:
     CORS_ALLOW_METHODS = ["*"]
     CORS_ALLOW_HEADERS = ["*"]
     CORS_ALLOW_CREDENTIALS = True
-
-else:
-    DEBUG = True
-
-    ALLOWED_HOSTS = ["*"]
-
-    CORS_ALLOW_ALL_ORIGINS = True
-    #CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:3000", "http://localhost:3000"]
 
 
 # Application definition
@@ -176,7 +173,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = 'media/'
 
-if not DEBUG:
+if DEBUG is not True:
     STATIC_ROOT = os.path.join(BASE_DIR / 'staticfiles')
     #STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
     STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticHashedCloudinaryStorage'
