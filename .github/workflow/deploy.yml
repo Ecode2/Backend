@@ -35,7 +35,7 @@ jobs:
 
             - name: Push to Heroku
               run: |
-                git push heroku main
+                git push heroku main --force
               # Deploys your code to Heroku.
 
             - name: Set Heroku Config Vars
