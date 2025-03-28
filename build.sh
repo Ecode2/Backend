@@ -9,6 +9,9 @@ pip install -r requirements.txt
 python manage.py migrate
 
 # Collect static files
-python manage.py collectstatic --noinput
+python manage.py collectstatic --noinput #--upload-unhashed-files
+python manage.py deleteorphanedmedia
+python manage.py deleteredundantstatic #--keep-unhashed-files
+
 
 echo "Build completed successfully."

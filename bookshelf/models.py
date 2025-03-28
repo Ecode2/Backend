@@ -2,6 +2,9 @@ import base64
 from io import BytesIO
 from django.db import models
 from django.conf import settings
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import UploadedFile
 
 from scripts.pdf_converter import PdfExtractor
 
@@ -12,6 +15,8 @@ BOOK_STATUS = [
     (PUBLIC, "Public"),
     (PRIVATE, "Private"),
 ]
+
+FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 10  # 10mb
 
 
 # Create your models here.
@@ -61,9 +66,18 @@ def handle_file_upload(instance, filename):
     return f"books/{instance.book.id}/{filename}"
 
 
+def file_validation(file):
+    if not file:
+        raise ValidationError("No file selected.")
+
+    if isinstance(file, UploadedFile):
+        if file.size > FILE_UPLOAD_MAX_MEMORY_SIZE:
+            raise ValidationError("File shouldn't be larger than 10MB.")
+
+
 class BookFile(models.Model):
     book = models.ForeignKey(Book, related_name="files", on_delete=models.CASCADE)
-    file = models.FileField(upload_to=handle_file_upload)
+    file = models.FileField(upload_to=handle_file_upload, storage=RawMediaCloudinaryStorage(), validators=[file_validation])
 
     def __str__(self):
         return f"{self.book.title} - {self.file}"

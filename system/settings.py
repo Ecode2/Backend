@@ -30,7 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", '\x9aL\xba\x10\xe4\xdc\x10\x9e\xe1\xb6\xbe[\xa9OI\x8f')
 
 # SECURITY WARNING: don't run with debug turned on in 
-DEBUG = os.getenv("DEBUG", False)
+DEBUG = os.getenv("DEBUG", True)
 
 if DEBUG == False:
     
@@ -65,7 +65,9 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
+    'cloudinary_storage',
+    'django.contrib.staticfiles',
+    'cloudinary',
 
     #'django.contrib.sites',
 
@@ -174,11 +176,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = 'media/'
 
-MEDIA_ROOT = BASE_DIR / "media"
-
 if not DEBUG:
     STATIC_ROOT = os.path.join(BASE_DIR / 'staticfiles')
-    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    #STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticHashedCloudinaryStorage'
+
+    MEDIA_URL = 'bookverse/media/'
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage' #'cloudinary_storage.storage.RawMediaCloudinaryStorage'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

@@ -7,41 +7,53 @@ on:
 
 jobs:
     deploy:
-        name: Deploy BookVerse
+        name: Deploy BookVerse to Heroku
         runs-on: ubuntu-latest
         if: github.ref == 'refs/heads/main'
 
         steps:
-            - name: Checkout
+            - name: Checkout Repository
               uses: actions/checkout@v2
+              # Clones your repository to the runner.
 
-            - name: Setup SSH for EC2
+            - name: Set up Heroku CLI
               run: |
-                mkdir -p ~/.ssh/
-                echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-                chmod 600 ~/.ssh/id_rsa
-                ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
+                curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+                heroku --version
+              # Installs the Heroku CLI for command-line access.
 
-            - name: Deploy to EC2
+            - name: Login to Heroku
+              env:
+                HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
               run: |
-                ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
-                set -e  # Exit immediately if any command fails
-                set -x  # Debug output
-                ls
-                cd ~/BookVerse || (git clone git@github.com:Ecode2/Backend.git ~/BookVerse && cd ~/BookVerse)
-                git pull origin main
-                if [ ! -d env ]; then sudo apt install python3-venv -y && python3 -m venv env; fi
-                source env/bin/activate
-                bash build.sh
+                echo $HEROKU_API_KEY | heroku login --api-key
+              # Authenticates with Heroku using your API key stored in GitHub Secrets.
 
-                # Set systemd environment variables
-                sudo systemctl set-environment ALLOWED_HOSTS="${{ secrets.EC2_PUBLIC_IP }}, ${{ secrets.EC2_PUBLIC_DOMAIN }}"
-                sudo systemctl set-environment CSRF_TRUSTED_ORIGINS="http://${{ secrets.EC2_PUBLIC_IP }}, http://${{ secrets.EC2_PUBLIC_DOMAIN }}, https://${{ secrets.FRONTEND_DOMAIN }}"
-                sudo systemctl set-environment CORS_ALLOWED_ORIGINS="http://${{ secrets.EC2_PUBLIC_IP }}, http://${{ secrets.EC2_PUBLIC_DOMAIN }}, https://${{ secrets.FRONTEND_DOMAIN }}"
-                sudo systemctl set-environment DEBUG=False
-                sudo systemctl set-environment SECRET_KEY="${{ secrets.SECRET_KEY }}"
-                sudo systemctl set-environment DATABASE_URL="${{ secrets.DATABASE_URL }}"
-                
-                sudo systemctl restart BookVerse
-                sudo systemctl restart nginx
-                EOF
+            - name: Add Heroku Remote
+              run: |
+                heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
+              # Links your repository to your Heroku app.
+
+            - name: Push to Heroku
+              run: |
+                git push heroku main
+              # Deploys your code to Heroku.
+
+            - name: Set Heroku Config Vars
+              run: |
+                heroku config:set CLOUDINARY_URL="${{ secrets.CLOUDINARY_URL }}" --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku config:set DATABASE_URL="${{ secrets.DATABASE_URL }}"
+                heroku config:set ALLOWED_HOSTS="${{ secrets.HEROKU_ALLOWED_HOSTS }}" --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku config:set CSRF_TRUSTED_ORIGINS="${{ secrets.HEROKU_TRUSTED_ORIGINS }}, https://${{ secrets.FRONTEND_DOMAIN }}" --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku config:set CORS_ALLOWED_ORIGINS="${{ secrets.HEROKU_TRUSTED_ORIGINS }}, https://${{ secrets.FRONTEND_DOMAIN }}" --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku config:set DEBUG=False --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku config:set SECRET_KEY="${{ secrets.SECRET_KEY }}" --app ${{ secrets.HEROKU_APP_NAME }}
+              # Sets necessary environment variables in Heroku (adjust as needed).
+
+            - name: Run Build Script Commands
+              run: |
+                heroku run python manage.py migrate --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku run python manage.py collectstatic --noinput --app ${{ secrets.HEROKU_APP_NAME }}
+                heroku run python manage.py deleteorphanedmedia
+                heroku run python manage.py deleteredundantstatic
+              # Executes migrations and collects static files, replacing build.sh.
