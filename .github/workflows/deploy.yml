@@ -41,7 +41,7 @@ jobs:
             - name: Set Heroku Config Vars
               run: |
                 heroku config:set CLOUDINARY_URL="${{ secrets.CLOUDINARY_URL }}" --app ${{ secrets.HEROKU_APP_NAME }}
-                heroku config:set DATABASE_URL="${{ secrets.DATABASE_URL }}"
+                heroku config:set DATABASE_URL="${{ secrets.DATABASE_URL }}" --app ${{ secrets.HEROKU_APP_NAME }}
                 heroku config:set ALLOWED_HOSTS="${{ secrets.HEROKU_ALLOWED_HOSTS }}" --app ${{ secrets.HEROKU_APP_NAME }}
                 heroku config:set CSRF_TRUSTED_ORIGINS="${{ secrets.HEROKU_TRUSTED_ORIGINS }}, https://${{ secrets.FRONTEND_DOMAIN }}" --app ${{ secrets.HEROKU_APP_NAME }}
                 heroku config:set CORS_ALLOWED_ORIGINS="${{ secrets.HEROKU_TRUSTED_ORIGINS }}, https://${{ secrets.FRONTEND_DOMAIN }}" --app ${{ secrets.HEROKU_APP_NAME }}
