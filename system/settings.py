@@ -220,19 +220,18 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
-""" CACHES = {
+CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/0",
+        "LOCATION": "redis://127.0.0.1:6379/1",
         #rediss://[[username]:[password]]@localhost:6379/0
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
-        'KEY_PREFIX': 'drf_cache'
+        # 'KEY_PREFIX': 'drf_cache'
     }
 }
 CACHE_TTL = 60 * 15 
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default" """
-
+SESSION_CACHE_ALIAS = "default"

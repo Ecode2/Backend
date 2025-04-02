@@ -1,7 +1,7 @@
-from django.shortcuts import get_object_or_404
-from rest_framework import generics, permissions, response, status
-from django.contrib.auth import login, authenticate, logout
+from rest_framework import generics, permissions
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
 
 from django.contrib.auth.models import User
 from .serializers import UserSerializer, CustomTokenObtainPairSerializer
@@ -29,6 +29,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
 
+@method_decorator(cache_page(60 * 15), name='dispatch')
 class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     """
     ProfileView is a view for retrieving, updating, and deleting the profile of the currently authenticated user.

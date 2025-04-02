@@ -9,6 +9,7 @@ import requests
 from rest_framework import viewsets, permissions, pagination, filters, response, status
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+from django.views.decorators.cache import cache_page
 
 #from core.mixins import CacheResponseMixin
 from .permissions import IsBookCreator, IsFileAuthor, PublicOrPrivate
@@ -20,7 +21,12 @@ from .serializers import BookFileSerializer, BookSerializer
 
 # Create your views here.
 
+def cache_with_prefix(timeout, prefix):
+    def decorator(view_func):
+        return cache_page(timeout, key_prefix=prefix)(view_func)
+    return decorator
 
+@method_decorator(cache_with_prefix(60 * 15, 'book_shelf'), name='dispatch')
 class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     queryset = Book.objects.all()
     serializer_class = BookSerializer
@@ -112,6 +118,12 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         return page
 
 
+def cache_with_prefix(timeout, prefix):
+    def decorator(view_func):
+        return cache_page(timeout, key_prefix=prefix)(view_func)
+    return decorator
+
+@method_decorator(cache_with_prefix(60 * 15, 'book_shelf'), name='dispatch')
 class BookFileViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     queryset = BookFile.objects.all()
     serializer_class = BookFileSerializer
