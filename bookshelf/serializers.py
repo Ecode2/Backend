@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 from cloudinary.utils import cloudinary_url
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
 from .models import Book, BookFile
 
 class BookSerializer(serializers.ModelSerializer):
