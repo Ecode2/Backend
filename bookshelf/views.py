@@ -1,8 +1,11 @@
+import tempfile
+from typing import Any
 from django.shortcuts import render
 from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils.decorators import method_decorator
 
+import requests
 from rest_framework import viewsets, permissions, pagination, filters, response, status
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -50,6 +53,19 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    def _get_pdf_path(self, file: Any):
+        """
+        Download the first PDF file from Cloudinary to a temporary local path.
+        Returns the path to the temporary file or None if the file cannot be downloaded.
+        """
+        response = requests.get(file.file.url)
+        if response.status_code == 200:
+            # Create a temporary file with a '.pdf' suffix
+            tmp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+            tmp_file.write(response.content)
+            tmp_file.close()  # Close the file so PdfExtractor can open it
+            return tmp_file.name
+
     @extend_schema(
             parameters=[OpenApiParameter("page", type=int, description="the pdf page to be displayed")]
     )
@@ -65,18 +81,19 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
 
         if not file:
             return response.Response(data="pdf file not found", status=status.HTTP_404_NOT_FOUND)
+        
+        #TODO: confirm the file path is absolute before passing it to get_pdf_path
+        file_path = self._get_pdf_path(file)
 
-        pdf_processor = PdfExtractor(file.file.path)
+        pdf_processor = PdfExtractor(file_path)#file.file.path)
 
         page_content = pdf_processor.get_one_page(int(page_number))
 
         page = response.Response(data={int(page_number): page_content}, status=status.HTTP_200_OK)
         return page
-     
 
     @action(detail=True, methods=['get'], url_path="pages", url_name="all_page", permission_classes=[permissions.AllowAny])
     def read_all_pages(self, request, pk=None, *args, **kwargs):
-
 
         book = self.get_object()
         file = book.files.first()
@@ -84,7 +101,10 @@ class BookViewSet(viewsets.ModelViewSet): #, CacheResponseMixin):
         if not file:
             return response.Response(data="pdf file not found", status=status.HTTP_404_NOT_FOUND)
 
-        pdf_processor = PdfExtractor(file.file.path)
+        #TODO: confirm the file path is absolute before passing it to get_pdf_path
+        file_path = self._get_pdf_path(file)
+
+        pdf_processor = PdfExtractor(file_path)#file.file.path)
 
         page = pdf_processor.get_all_pages()
 

@@ -10,7 +10,10 @@ def delete_book_file(sender, instance, **kwargs):
 
     for book_file in book_files:
         if book_file.file:
-            if os.path.isfile(book_file.file.path):
-                os.remove(book_file.file.path)
+            try:
+                if os.path.isfile(book_file.file.path):
+                    os.remove(book_file.file.path)
 
-            book_file.delete()
+                book_file.delete()
+            except Exception as e:
+                pass
