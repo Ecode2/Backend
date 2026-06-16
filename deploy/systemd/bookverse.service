@@ -1,0 +1,21 @@
+[Unit]
+Description=Bookverse ASGI (Gunicorn + Uvicorn worker; HTTP + WebSocket)
+After=network.target postgresql.service redis-server.service minio.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+User=bookverse
+Group=www-data
+WorkingDirectory=/opt/bookverse/app
+EnvironmentFile=/opt/bookverse/.env
+ExecStart=/opt/bookverse/venv/bin/gunicorn system.asgi:application \
+  -k uvicorn.workers.UvicornWorker \
+  --workers 3 \
+  --bind unix:/run/bookverse/bookverse.sock \
+  --timeout 120
+Restart=always
+RestartSec=3
+RuntimeDirectory=bookverse
+
+[Install]
+WantedBy=multi-user.target

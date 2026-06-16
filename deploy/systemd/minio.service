@@ -1,0 +1,16 @@
+[Unit]
+Description=MinIO object storage (S3-compatible)
+After=network.target
+Wants=network-online.target
+
+[Service]
+User=minio-user
+Group=minio-user
+EnvironmentFile=/etc/default/minio
+ExecStart=/usr/local/bin/minio server $MINIO_VOLUMES --address $MINIO_ADDRESS --console-address $MINIO_CONSOLE_ADDRESS
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
