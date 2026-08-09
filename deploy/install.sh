@@ -28,7 +28,8 @@ apt-get update -y
 apt-get install -y \
   postgresql postgresql-contrib redis-server nginx \
   python3-venv python3-dev build-essential libpq-dev git curl \
-  certbot python3-certbot-nginx
+  certbot python3-certbot-nginx \
+  libxml2-dev libxslt1-dev zlib1g-dev libjpeg-dev
 
 # --- 2. App user + directories ---------------------------------------------
 if ! id "${APP_USER}" >/dev/null 2>&1; then
