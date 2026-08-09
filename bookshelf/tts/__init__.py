@@ -22,6 +22,7 @@ from .base import TTSService
 logger = logging.getLogger(__name__)
 
 _PROVIDERS = {
+    "nvidia": "bookshelf.tts.nvidia.NvidiaTTSService",
     "google": "bookshelf.tts.google.GoogleTTSService",
     "piper": "bookshelf.tts.piper.PiperTTSService",
     "dummy": "bookshelf.tts.dummy.DummyTTSService",
@@ -32,8 +33,8 @@ _PROVIDERS = {
 def get_tts_service() -> TTSService:
     from django.utils.module_loading import import_string
 
-    provider = getattr(settings, "TTS_PROVIDER", "google")
-    path = _PROVIDERS.get(provider, _PROVIDERS["google"])
+    provider = getattr(settings, "TTS_PROVIDER", "nvidia")
+    path = _PROVIDERS.get(provider, _PROVIDERS["nvidia"])
     return import_string(path)()
 
 

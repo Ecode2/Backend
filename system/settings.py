@@ -322,11 +322,24 @@ WS_TICKET_TTL_SECONDS = int(os.getenv("WS_TICKET_TTL_SECONDS", "30"))
 # ---------------------------------------------------------------------------
 # Text-to-Speech (pluggable provider)
 # ---------------------------------------------------------------------------
-TTS_PROVIDER = os.getenv("TTS_PROVIDER", "google")  # "google" | "piper" | "dummy"
-TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "en-US-Neural2-F")
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "nvidia")  # "nvidia" | "google" | "piper" | "dummy"
+TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "Magpie-Multilingual.EN-US.Aria")
 TTS_DEFAULT_LANGUAGE = os.getenv("TTS_DEFAULT_LANGUAGE", "en-US")
 TTS_AUDIO_ENCODING = os.getenv("TTS_AUDIO_ENCODING", "MP3")  # MP3 | OGG_OPUS
 TTS_MAX_INPUT_BYTES = int(os.getenv("TTS_MAX_INPUT_BYTES", "4500"))
+# NVIDIA Riva engine config (only used when TTS_PROVIDER=nvidia). NVIDIA's
+# hosted TTS models are served over gRPC and selected by a "function-id"
+# (copy it from the model's page on build.nvidia.com), not a model name --
+# the default below is Magpie-TTS Multilingual.
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_TTS_SERVER = os.getenv("NVIDIA_TTS_SERVER", "grpc.nvcf.nvidia.com:443")
+NVIDIA_TTS_FUNCTION_ID = os.getenv(
+    "NVIDIA_TTS_FUNCTION_ID", "877104f7-e885-42b9-8de8-f6e4c6303969"
+)
+NVIDIA_TTS_USE_SSL = os.getenv(
+    "NVIDIA_TTS_USE_SSL", "true" if NVIDIA_TTS_SERVER == "grpc.nvcf.nvidia.com:443" else "false"
+).lower() == "true"
+NVIDIA_TTS_SAMPLE_RATE_HZ = int(os.getenv("NVIDIA_TTS_SAMPLE_RATE_HZ", "44100"))
 # Local engine config (only used when TTS_PROVIDER=piper).
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
 PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "")
