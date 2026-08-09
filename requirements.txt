@@ -16,9 +16,12 @@ uvicorn[standard]==0.34.0
 django-storages==1.14.4
 boto3==1.35.99
 
-# Text-to-Speech (pluggable; NVIDIA Riva is the default provider)
-nvidia-riva-client==2.24.0
-google-cloud-texttospeech==2.21.0
+# Text-to-Speech (pluggable; NVIDIA Riva is the default provider). Pinned to
+# versions whose grpcio/protobuf ranges overlap and that ship prebuilt wheels
+# for current CPython (older nvidia-riva-client hard-pins grpcio==1.67.1,
+# which has no wheel on newer Python and forces a slow/fragile source build).
+nvidia-riva-client==2.26.0
+google-cloud-texttospeech==2.37.0
 
 # Document parsing layer
 ebooklib==0.18
