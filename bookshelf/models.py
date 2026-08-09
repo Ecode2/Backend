@@ -43,7 +43,13 @@ class Book(models.Model):
 
     book_type = models.CharField(max_length=20, choices=BOOK_TYPES, default=DOCUMENT)
     language_code = models.CharField(max_length=16, default="en-US")
+    # Legacy column: held a *presigned* S3/MinIO URL, which expires after
+    # AWS_QUERYSTRING_EXPIRE (1h by default), so stored covers broke an hour
+    # after upload. Kept only so pre-existing rows keep resolving.
     cover_url = models.URLField(blank=True, null=True)
+    # Storage key for the cover image. The serializer signs this per request so
+    # the URL handed to the client is always fresh.
+    cover_path = models.CharField(max_length=512, blank=True, default="")
 
     # Denormalized after parsing / audio probing, for fast library rendering.
     total_page = models.IntegerField(null=True, blank=True, default=0)
@@ -207,7 +213,11 @@ class ReaderSettings(models.Model):
         settings.AUTH_USER_MODEL, related_name="reader_settings",
         on_delete=models.CASCADE,
     )
-    voice_name = models.CharField(max_length=64, default="en-US-Neural2-F")
+    # Blank means "use settings.TTS_DEFAULT_VOICE". Storing a concrete default
+    # here pinned every user to one provider's naming scheme: the old default
+    # was a Google voice, which the NVIDIA/Riva backend cannot synthesize, and
+    # because the consumer prefers this value it overrode TTS_DEFAULT_VOICE.
+    voice_name = models.CharField(max_length=64, blank=True, default="")
     language_code = models.CharField(max_length=16, default="en-US")
     speaking_rate = models.FloatField(default=1.0)  # baked TTS rate; keep 1.0
     pitch = models.FloatField(default=0.0)

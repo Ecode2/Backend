@@ -329,3 +329,120 @@ class BookFileManagementTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["title"], "New")
         self.assertEqual(res.data["status"], "public")
+
+
+class ChannelLayerConfigTests(TestCase):
+    """Guards the Redis socket-timeout invariant the audio WebSocket depends on.
+
+    channels_redis waits for messages with a blocking BZPOPMIN that lasts
+    ``brpop_timeout`` seconds. redis-py >= 6 defaults ``socket_timeout`` to 5s,
+    which is exactly that long, so an idle WebSocket died with
+    "redis.exceptions.TimeoutError: Timeout reading from ...".
+    """
+
+    def test_socket_timeout_exceeds_blocking_pop_timeout(self):
+        from django.conf import settings
+        from channels_redis.core import RedisChannelLayer
+
+        hosts = settings.CHANNEL_LAYERS["default"]["CONFIG"]["hosts"]
+        self.assertTrue(hosts, "channel layer must configure at least one host")
+        for host in hosts:
+            self.assertIsInstance(
+                host, dict,
+                "hosts must be dicts so connection kwargs can be passed; a bare "
+                "URL string inherits redis-py's 5s socket_timeout default",
+            )
+            socket_timeout = host.get("socket_timeout")
+            self.assertIsNotNone(
+                socket_timeout,
+                "socket_timeout must be set explicitly, not left to redis-py",
+            )
+            self.assertGreater(
+                socket_timeout,
+                RedisChannelLayer.brpop_timeout,
+                "socket_timeout must exceed brpop_timeout or idle receives raise "
+                "redis.exceptions.TimeoutError",
+            )
+
+
+class BookCoverTests(TestCase):
+    """Covers are rendered from the PDF's first page and must keep resolving.
+
+    The URL is signed per request: storing ``storage.url()`` persisted a
+    presigned S3/MinIO link that expired after AWS_QUERYSTRING_EXPIRE, so every
+    cover broke about an hour after upload.
+    """
+
+    def setUp(self):
+        from bookshelf.models import Book
+
+        self.user = User.objects.create_user("coverowner", password="pw12345!")
+        self.book = Book.objects.create(title="Covered", user=self.user)
+
+    def _pdf_bytes(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "First page content.", fontsize=14)
+        data = doc.tobytes()
+        doc.close()
+        return data
+
+    def _upload_pdf(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        res = client.post(
+            "/files/",
+            {
+                "book": self.book.id,
+                "file": SimpleUploadedFile("doc.pdf", self._pdf_bytes()),
+                "order": 0,
+            },
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        return client
+
+    def test_pdf_upload_generates_a_cover(self):
+        self._upload_pdf()
+        self.book.refresh_from_db()
+        self.assertTrue(
+            self.book.cover_path,
+            "uploading a PDF should render its first page into cover_path",
+        )
+
+    def test_serializer_exposes_cover_url_from_stored_path(self):
+        client = self._upload_pdf()
+        res = client.get(f"/books/{self.book.id}/")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(
+            res.data["cover_url"],
+            "the API must expose a usable cover_url for the frontend",
+        )
+
+    def test_cover_url_is_regenerated_not_read_from_a_stale_column(self):
+        """A stale stored URL must never be served when a path is present."""
+        from bookshelf.models import Book
+        from bookshelf.serializers import BookSerializer
+
+        Book.objects.filter(pk=self.book.pk).update(
+            cover_path="books/1/cover.png",
+            cover_url="http://minio/expired?Signature=old&Expires=1",
+        )
+        data = BookSerializer(Book.objects.get(pk=self.book.pk)).data
+        self.assertNotIn("Expires=1", data["cover_url"] or "")
+        self.assertIn("cover.png", data["cover_url"] or "")
+
+    def test_legacy_rows_without_a_path_still_resolve(self):
+        from bookshelf.models import Book
+        from bookshelf.serializers import BookSerializer
+
+        Book.objects.filter(pk=self.book.pk).update(
+            cover_path="", cover_url="http://example.com/legacy.png"
+        )
+        data = BookSerializer(Book.objects.get(pk=self.book.pk)).data
+        self.assertEqual(data["cover_url"], "http://example.com/legacy.png")

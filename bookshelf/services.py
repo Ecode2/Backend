@@ -152,9 +152,15 @@ def generate_cover(book_file: BookFile) -> str | None:
     ext = "png" if content_type.endswith("png") else "jpg"
     name = f"books/{book_file.book_id}/cover.{ext}"
     saved = book_file.file.storage.save(name, ContentFile(data))
-    url = book_file.file.storage.url(saved)
-    Book.objects.filter(pk=book_file.book_id).update(cover_url=url)
-    return url
+    # Persist the storage key, not the URL: on S3/MinIO ``storage.url()``
+    # returns a presigned link that expires, so saving it would leave every
+    # cover broken an hour later. The serializer signs ``cover_path`` per
+    # request instead.
+    Book.objects.filter(pk=book_file.book_id).update(cover_path=saved)
+    try:
+        return book_file.file.storage.url(saved)
+    except Exception:
+        return saved
 
 
 def _pdf_cover(book_file: BookFile) -> tuple[bytes, str]:

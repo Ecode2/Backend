@@ -40,6 +40,8 @@ class BookFileSerializer(serializers.ModelSerializer):
 class BookSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField(read_only=True)
     files = BookFileSerializer(many=True, read_only=True)
+    # Signed per request: S3/MinIO URLs expire, so a stored one goes stale.
+    cover_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
@@ -49,10 +51,24 @@ class BookSerializer(serializers.ModelSerializer):
             "total_page", "total_segments", "duration_estimate_ms",
             "files", "updated_at", "created_at",
         ]
+        # NB: "cover_url" is declared above; DRF rejects listing a declared
+        # field here as well. SerializerMethodField is already read-only.
         read_only_fields = [
-            "id", "user", "created_at", "updated_at", "cover_url",
+            "id", "user", "created_at", "updated_at",
             "total_segments", "duration_estimate_ms",
         ]
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_cover_url(self, obj):
+        """Fresh URL for the stored cover key, falling back to legacy rows."""
+        if obj.cover_path:
+            try:
+                from django.core.files.storage import default_storage
+
+                return default_storage.url(obj.cover_path)
+            except Exception:
+                pass
+        return obj.cover_url or None
 
 
 class TocEntrySerializer(serializers.Serializer):

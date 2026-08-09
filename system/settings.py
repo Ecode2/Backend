@@ -185,10 +185,28 @@ CACHES = {
 }
 CACHE_TTL = 60 * 15
 
+# channels_redis waits for messages with a *blocking* BZPOPMIN whose server-side
+# timeout is `RedisChannelLayer.brpop_timeout` (5s). redis-py >= 6 changed the
+# default client `socket_timeout` from None to 5s, so the socket read deadline
+# and the blocking pop expire at the same moment: an idle WebSocket dies with
+# "redis.exceptions.TimeoutError: Timeout reading from ...". The socket timeout
+# must therefore stay comfortably above brpop_timeout.
+CHANNELS_BRPOP_TIMEOUT = 5  # must match RedisChannelLayer.brpop_timeout
+CHANNELS_SOCKET_TIMEOUT = CHANNELS_BRPOP_TIMEOUT * 4
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_CHANNEL_URL]},
+        "CONFIG": {
+            "hosts": [
+                {
+                    "address": REDIS_CHANNEL_URL,
+                    "socket_timeout": CHANNELS_SOCKET_TIMEOUT,
+                    "socket_connect_timeout": 5,
+                    "socket_keepalive": True,
+                }
+            ],
+        },
     }
 }
 
