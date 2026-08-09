@@ -158,13 +158,13 @@ def generate_cover(book_file: BookFile) -> str | None:
 
 
 def _pdf_cover(book_file: BookFile) -> tuple[bytes, str]:
-    import fitz
+    import pymupdf
 
     with local_copy(book_file.file, suffix=".pdf") as path:
-        doc = fitz.open(path)
+        doc = pymupdf.open(path)
         try:
             page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5))
             return pix.tobytes("png"), "image/png"
         finally:
             doc.close()

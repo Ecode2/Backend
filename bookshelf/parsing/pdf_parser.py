@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-import fitz  # PyMuPDF
+import pymupdf
 
 from .base import DocumentParser, SegmentBuilder
 from .segments import HEADING, PARAGRAPH, LIST_ITEM
@@ -12,7 +12,7 @@ from .segments import HEADING, PARAGRAPH, LIST_ITEM
 
 class PdfParser(DocumentParser):
     def parse(self):
-        doc = fitz.open(self.local_path)
+        doc = pymupdf.open(self.local_path)
         try:
             return self._parse(doc)
         finally:

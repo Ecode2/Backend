@@ -1,67 +1,63 @@
-asgiref==3.8.1
-attrs==25.3.0
-certifi==2025.1.31
-charset-normalizer==3.4.1
-cloudinary==1.43.0
-dj-database-url==2.3.0
+# ===========================================================================
+# Bookverse backend dependencies.
+#
+# Direct dependencies only -- transitive packages are left for pip to resolve.
+# (This file used to be a `pip freeze` dump; the pinned transitive versions
+# had no wheels for current CPython and forced fragile source builds.)
+#
+# Target runtime: Python 3.13+ (Ubuntu 26.04 ships 3.14 as the system python).
+# Django is held at the 5.2 LTS series, which supports Python 3.13 and 3.14
+# and receives security fixes until April 2028.
+# ===========================================================================
 
-# --- Bookverse audiobook reader additions ---
-# Async / WebSocket stack (single ASGI process serves HTTP + WS)
-channels==4.2.0
-channels-redis==4.2.1
-daphne==4.1.2
-uvicorn[standard]==0.34.0
+# --- Core web stack --------------------------------------------------------
+Django==5.2.17
+djangorestframework==3.18.0
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-filter==26.1
+drf-spectacular==0.30.0
+drf-spectacular-sidecar==2026.8.1
+whitenoise==6.12.0
 
-# S3-compatible object storage (MinIO on the VPS)
-django-storages==1.14.4
-boto3==1.35.99
+# --- Async / WebSocket stack (single ASGI process serves HTTP + WS) --------
+channels==4.3.2
+channels-redis==4.3.0
+daphne==4.2.3
+uvicorn[standard]==0.52.1
+gunicorn==26.0.0
 
-# Text-to-Speech (pluggable; NVIDIA Riva is the default provider). Pinned to
-# versions whose grpcio/protobuf ranges overlap and that ship prebuilt wheels
-# for current CPython (older nvidia-riva-client hard-pins grpcio==1.67.1,
-# which has no wheel on newer Python and forces a slow/fragile source build).
+# --- Database / cache ------------------------------------------------------
+psycopg2-binary==2.9.12
+dj-database-url==3.1.2
+django-redis==7.0.0
+redis==8.1.0
+
+# --- S3-compatible object storage (MinIO on the VPS) -----------------------
+django-storages==1.14.6
+boto3==1.43.67
+
+# --- Text-to-Speech (pluggable; NVIDIA Riva is the default provider) -------
+# nvidia-riva-client pins grpcio/protobuf tightly; these versions are the ones
+# whose ranges overlap with google-cloud-texttospeech AND ship prebuilt wheels
+# for current CPython. Older nvidia-riva-client hard-pins grpcio==1.67.1,
+# which has no 3.14 wheel and triggers a very slow gRPC source build.
 nvidia-riva-client==2.26.0
 google-cloud-texttospeech==2.37.0
 
-# Document parsing layer
-ebooklib==0.18
-beautifulsoup4==4.13.3
-lxml==5.3.0
-python-docx==1.1.2
+# --- Document parsing layer ------------------------------------------------
+ebooklib==0.20
+beautifulsoup4==4.15.0
+lxml==6.1.1
+python-docx==1.2.0
+PyMuPDF==1.28.2
+pillow==12.3.0
 
-# Native audiobook metadata (embedded chapter markers for m4b/mp3)
-mutagen==1.47.0
-# --- end additions ---
-Django==5.1.7
-django-cloudinary-storage==0.3.0
-django-cors-headers==4.7.0
-django-filter==25.1
-django-redis==5.4.0
-djangorestframework==3.15.2
-djangorestframework_simplejwt==5.5.0
-drf-spectacular==0.28.0
-drf-spectacular-sidecar==2025.3.1
-gunicorn==23.0.0
-idna==3.10
-inflection==0.5.1
-jsonschema==4.23.0
-jsonschema-specifications==2024.10.1
-packaging==24.2
-pillow==11.1.0
-psycopg2-binary==2.9.10
-PyJWT==2.9.0
-PyMuPDF==1.25.4
+# --- Native audiobook metadata (embedded chapter markers for m4b/mp3) ------
+mutagen==1.48.1
+
+# --- Misc ------------------------------------------------------------------
+python-dotenv==1.2.2
+
+# Used only by the helper scripts in scripts/, not by the app itself.
 PyPDF2==3.0.1
-python-dotenv==1.0.1
-python-magic==0.4.27
-PyYAML==6.0.2
-redis==5.2.1
-referencing==0.36.2
-requests==2.32.3
-rpds-py==0.23.1
-six==1.17.0
-sqlparse==0.5.3
-typing_extensions==4.12.2
-uritemplate==4.1.1
-urllib3==2.3.0
-whitenoise==6.9.0

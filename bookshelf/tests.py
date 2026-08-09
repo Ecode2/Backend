@@ -73,9 +73,9 @@ class DocxParserTests(TestCase):
 
 class PdfParserTests(TestCase):
     def test_extracts_text_and_pages(self):
-        import fitz
+        import pymupdf
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text((72, 72), "Hello PDF world.", fontsize=12)
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:

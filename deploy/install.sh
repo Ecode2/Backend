@@ -53,6 +53,11 @@ if [ ! -f "${ENV_FILE}" ]; then
   chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
   warn "Edit ${ENV_FILE} (secrets, DB password, MinIO creds) then re-run."
+  # Stop here on the very first run. Continuing would provision Postgres and
+  # MinIO with the placeholder credentials from .env.example; because the rest
+  # of the script is idempotent it would then *skip* recreating them, leaving
+  # the real passwords in .env permanently out of sync with the services.
+  exit 1
 fi
 # shellcheck disable=SC1090
 set -a; source "${ENV_FILE}"; set +a
@@ -106,12 +111,17 @@ mc alias set bvlocal "http://127.0.0.1:9000" "${MINIO_ROOT_USER:-bookverse}" "${
 mc mb --ignore-existing "bvlocal/${AWS_STORAGE_BUCKET_NAME:-bookverse}" >/dev/null 2>&1 || true
 
 # --- 7. Python venv + deps --------------------------------------------------
+# Django 5.2 LTS supports Python 3.10-3.14, so the distro python3 is fine on
+# both Ubuntu 24.04 (3.12) and 26.04 (3.14). Every pinned dependency ships a
+# prebuilt wheel for those versions -- if pip starts compiling from source,
+# a pin has drifted ahead of (or behind) its wheel coverage.
+log "Using $(python3 --version) at $(command -v python3)"
 if [ ! -d "${VENV_DIR}" ]; then
   log "Creating venv at ${VENV_DIR}"
   sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --upgrade pip
-sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install -r "${APP_DIR}/requirements.txt"
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --prefer-binary -r "${APP_DIR}/requirements.txt"
 
 # --- 8. Migrate + collectstatic --------------------------------------------
 log "Running migrations and collectstatic..."
@@ -139,10 +149,11 @@ cat <<EOF
 \033[1;32m[install] Done.\033[0m Next steps:
   1. Edit ${ENV_FILE} with real secrets, then: sudo systemctl restart bookverse
   2. TLS:   sudo certbot --nginx -d bookverse.api.ecode2.com
-  3. Google TTS: create a service account with role
-       "Cloud Text-to-Speech API User", enable the Text-to-Speech API,
-       download the JSON key to /opt/bookverse/gcp-tts.json and set
-       GOOGLE_APPLICATION_CREDENTIALS in ${ENV_FILE}.
-       (Or set TTS_PROVIDER=piper for a fully local engine.)
+  3. TTS (default provider is NVIDIA): get a free API key from
+       build.nvidia.com ("Get API Key" on any model page) and set
+       NVIDIA_API_KEY in ${ENV_FILE}. To use a different NVIDIA TTS model,
+       copy that model's "function-id" into NVIDIA_TTS_FUNCTION_ID and set
+       TTS_DEFAULT_VOICE to one of its voices.
+       (Or set TTS_PROVIDER=google/piper/dummy for the other backends.)
   4. Verify: sudo bash ${APP_DIR}/deploy/restart.sh
 EOF
