@@ -68,13 +68,32 @@ systemctl enable --now postgresql
 systemctl enable --now redis-server
 systemctl enable --now nginx
 
-# --- 5. Postgres role + database (skip if present) -------------------------
+# --- 5. Postgres role + database --------------------------------------------
 PG_DB="${POSTGRES_DB:-bookverse}"
 PG_USER="${POSTGRES_USER:-bookverse}"
 PG_PASS="${POSTGRES_PASSWORD:-bookverse}"
+PG_PASS_SQL="${PG_PASS//\'/\'\'}"   # escape single quotes for the SQL literal
+
+# Django connects via DATABASE_URL but the role is provisioned from
+# POSTGRES_PASSWORD; if the two disagree every connection fails with
+# "password authentication failed" no matter how often you re-run this.
+if [[ "${DATABASE_URL:-}" =~ ^[a-z+]+://[^:/]+:([^@]*)@ ]]; then
+  if [ "${BASH_REMATCH[1]}" != "${PG_PASS}" ]; then
+    warn "DATABASE_URL's password does not match POSTGRES_PASSWORD in ${ENV_FILE}."
+    warn "Django uses DATABASE_URL; this role is provisioned from POSTGRES_PASSWORD."
+    warn "Make them identical, then re-run."
+  fi
+fi
+
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'" | grep -q 1; then
   log "Creating Postgres role ${PG_USER}"
-  sudo -u postgres psql -c "CREATE ROLE ${PG_USER} LOGIN PASSWORD '${PG_PASS}';"
+  sudo -u postgres psql -c "CREATE ROLE ${PG_USER} LOGIN PASSWORD '${PG_PASS_SQL}';"
+else
+  # Reconcile on every run. The role usually outlives ${ENV_FILE} (a previous
+  # run may have created it from the .env.example placeholders), and since we
+  # skip creation when it exists the two would otherwise never converge.
+  log "Syncing Postgres role ${PG_USER} password with ${ENV_FILE}"
+  sudo -u postgres psql -c "ALTER ROLE ${PG_USER} WITH LOGIN PASSWORD '${PG_PASS_SQL}';"
 fi
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" | grep -q 1; then
   log "Creating Postgres database ${PG_DB}"
@@ -92,19 +111,32 @@ fi
 id "${MINIO_USER}" >/dev/null 2>&1 || adduser --system --group --no-create-home "${MINIO_USER}"
 mkdir -p "${MINIO_DATA}"
 chown -R "${MINIO_USER}:${MINIO_USER}" "${MINIO_DATA}"
-if [ ! -f /etc/default/minio ]; then
-  cat > /etc/default/minio <<EOF
+# Regenerated every run (same reason as the Postgres role above): .env is the
+# single source of truth, so editing credentials there must actually reach the
+# running service instead of being ignored because the file already exists.
+MINIO_TMP="$(mktemp)"
+cat > "${MINIO_TMP}" <<EOF
 MINIO_VOLUMES="${MINIO_DATA}"
 MINIO_ADDRESS=":9000"
 MINIO_CONSOLE_ADDRESS=":9001"
 MINIO_ROOT_USER="${MINIO_ROOT_USER:-bookverse}"
 MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-changemechangeme}"
 EOF
-  chmod 600 /etc/default/minio
+MINIO_CREDS_CHANGED=0
+if ! cmp -s "${MINIO_TMP}" /etc/default/minio; then
+  log "Writing /etc/default/minio from ${ENV_FILE}"
+  install -m 600 "${MINIO_TMP}" /etc/default/minio
+  MINIO_CREDS_CHANGED=1
 fi
+rm -f "${MINIO_TMP}"
+
 install -m 644 "${APP_DIR}/deploy/systemd/minio.service" /etc/systemd/system/minio.service
 systemctl daemon-reload
 systemctl enable --now minio
+if [ "${MINIO_CREDS_CHANGED}" -eq 1 ]; then
+  log "MinIO config changed — restarting"
+  systemctl restart minio
+fi
 sleep 3
 # Create the bucket via mc (idempotent).
 mc alias set bvlocal "http://127.0.0.1:9000" "${MINIO_ROOT_USER:-bookverse}" "${MINIO_ROOT_PASSWORD:-changemechangeme}" >/dev/null 2>&1 || true
