@@ -8,11 +8,17 @@ from .models import (
     Bookmark,
     ReaderSettings,
     ReadingProgress,
+    file_validation,
 )
 
 
 class BookFileSerializer(serializers.ModelSerializer):
-    file = serializers.FileField()
+    # Declaring the field explicitly replaces the one ModelSerializer would
+    # build from the model, which also drops the model field's validators.
+    # Without this, the API accepted *any* file type or size (the format and
+    # 50MB/500MB limits were silently unenforced) and only failed later during
+    # parsing, where the exception is swallowed.
+    file = serializers.FileField(validators=[file_validation])
     url = serializers.SerializerMethodField()
 
     class Meta:
@@ -113,3 +119,21 @@ class VoiceSerializer(serializers.Serializer):
     language_codes = serializers.ListField(child=serializers.CharField())
     ssml_gender = serializers.CharField()
     natural_sample_rate_hertz = serializers.IntegerField(required=False)
+
+
+class LibraryStatsSerializer(serializers.Serializer):
+    """Aggregate reading stats for the authenticated user.
+
+    Every field is derived from stored data. Note that wall-clock time spent
+    reading is *not* tracked anywhere, so ``estimated_listening_ms`` is an
+    estimate (narration duration x progress), not a measurement.
+    """
+
+    books_in_library = serializers.IntegerField()
+    documents = serializers.IntegerField()
+    audiobooks = serializers.IntegerField()
+    books_started = serializers.IntegerField()
+    books_completed = serializers.IntegerField()
+    books_in_progress = serializers.IntegerField()
+    estimated_listening_ms = serializers.IntegerField()
+    bookmarks = serializers.IntegerField()

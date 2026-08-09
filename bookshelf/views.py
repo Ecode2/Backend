@@ -10,7 +10,8 @@ Bug fixes vs. the original (Section 2 of the spec):
   * Single ``cache_with_prefix`` definition.
 """
 
-from django.db.models import Q
+from django.db.models import Count, ExpressionWrapper, F, FloatField, Q, Sum
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from django.views.decorators.cache import cache_page
 
@@ -29,6 +30,7 @@ from .serializers import (
     BookFileSerializer,
     BookSerializer,
     BookmarkSerializer,
+    LibraryStatsSerializer,
     ReaderSettingsSerializer,
     ReadingProgressSerializer,
     SegmentSerializer,
@@ -261,6 +263,55 @@ class ReaderSettingsView(RetrieveUpdateAPIView):
     def get_object(self):
         obj, _ = ReaderSettings.objects.get_or_create(user=self.request.user)
         return obj
+
+
+COMPLETED_PERCENT = 99.5  # progress is 0-100; treat "essentially finished" as done
+
+
+class LibraryStatsView(APIView):
+    """Aggregate reading stats for the current user. GET /api/stats/
+
+    Library counts cover books the user *owns*; progress counts cover every
+    book they have actually opened, which includes public books owned by
+    someone else.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses=LibraryStatsSerializer)
+    def get(self, request):
+        user = request.user
+        books = Book.objects.filter(user=user)
+        progress = ReadingProgress.objects.filter(user=user)
+
+        by_type = dict(
+            books.values_list("book_type").annotate(n=Count("id")).values_list("book_type", "n")
+        )
+
+        # Wall-clock reading time is not recorded, so approximate listened time
+        # as narration duration x fraction completed.
+        listened = progress.aggregate(
+            ms=Sum(
+                ExpressionWrapper(
+                    Coalesce(F("book__duration_estimate_ms"), 0) * F("percent") / 100.0,
+                    output_field=FloatField(),
+                )
+            )
+        )["ms"] or 0.0
+
+        data = {
+            "books_in_library": books.count(),
+            "documents": by_type.get("document", 0),
+            "audiobooks": by_type.get("audiobook", 0),
+            "books_started": progress.filter(percent__gt=0).count(),
+            "books_completed": progress.filter(percent__gte=COMPLETED_PERCENT).count(),
+            "books_in_progress": progress.filter(
+                percent__gt=0, percent__lt=COMPLETED_PERCENT
+            ).count(),
+            "estimated_listening_ms": int(listened),
+            "bookmarks": Bookmark.objects.filter(user=user).count(),
+        }
+        return response.Response(LibraryStatsSerializer(data).data)
 
 
 class VoicesView(APIView):

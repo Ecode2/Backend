@@ -162,3 +162,170 @@ class ReaderConsumerTests(TestCase):
         self.assertTrue(len(audio) > 0)
 
         await communicator.disconnect()
+
+
+class LibraryStatsTests(TestCase):
+    """GET /api/stats/ must aggregate real stored data, not placeholders."""
+
+    def setUp(self):
+        from bookshelf.models import Book, Bookmark, ReadingProgress
+
+        self.user = User.objects.create_user("statsuser", password="pw12345!")
+        other = User.objects.create_user("other", password="pw12345!")
+
+        self.doc = Book.objects.create(
+            title="Doc", user=self.user, book_type="document",
+            duration_estimate_ms=60_000,
+        )
+        self.audio = Book.objects.create(
+            title="Audio", user=self.user, book_type="audiobook",
+            duration_estimate_ms=100_000,
+        )
+        # A public book owned by someone else that this user has started.
+        foreign = Book.objects.create(
+            title="Foreign", user=other, status="public",
+            duration_estimate_ms=200_000,
+        )
+
+        ReadingProgress.objects.create(user=self.user, book=self.doc, percent=100.0)
+        ReadingProgress.objects.create(user=self.user, book=self.audio, percent=50.0)
+        ReadingProgress.objects.create(user=self.user, book=foreign, percent=0.0)
+        Bookmark.objects.create(user=self.user, book=self.doc, segment_index=3)
+
+    def _get(self):
+        # Only JWTAuthentication is configured, so Django's session-based
+        # force_login() would not authenticate the request.
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        return client.get("/api/stats/")
+
+    def test_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        self.assertIn(APIClient().get("/api/stats/").status_code, (401, 403))
+
+    def test_counts_only_own_books_in_library(self):
+        data = self._get().json()
+        # "Foreign" is readable but not owned, so it must not inflate the library.
+        self.assertEqual(data["books_in_library"], 2)
+        self.assertEqual(data["documents"], 1)
+        self.assertEqual(data["audiobooks"], 1)
+
+    def test_progress_buckets(self):
+        data = self._get().json()
+        # percent=0 counts as not started, 100 as completed, 50 as in progress.
+        self.assertEqual(data["books_started"], 2)
+        self.assertEqual(data["books_completed"], 1)
+        self.assertEqual(data["books_in_progress"], 1)
+
+    def test_estimated_listening_time_weights_duration_by_progress(self):
+        data = self._get().json()
+        # 60000*1.0 + 100000*0.5 + 200000*0.0 = 110000
+        self.assertEqual(data["estimated_listening_ms"], 110_000)
+
+    def test_bookmarks_counted(self):
+        self.assertEqual(self._get().json()["bookmarks"], 1)
+
+
+class BookFileManagementTests(TestCase):
+    """The endpoints the frontend's edit dialog relies on.
+
+    Covers the two things the UI newly exposes: uploading a non-PDF document
+    (EPUB) and replacing a file that was uploaded by mistake.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from bookshelf.models import Book
+
+        self.user = User.objects.create_user("owner", password="pw12345!")
+        self.stranger = User.objects.create_user("stranger", password="pw12345!")
+        self.book = Book.objects.create(title="B", user=self.user)
+
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.user)
+
+    def _epub_bytes(self):
+        from ebooklib import epub
+
+        book = epub.EpubBook()
+        book.set_identifier("id1")
+        book.set_title("T")
+        c1 = epub.EpubHtml(title="One", file_name="c1.xhtml")
+        c1.content = "<html><body><h1>One</h1><p>Epub body text.</p></body></html>"
+        book.add_item(c1)
+        book.toc = (epub.Link("c1.xhtml", "One", "c1"),)
+        book.spine = [c1]
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as f:
+            path = f.name
+        epub.write_epub(path, book)
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        finally:
+            os.remove(path)
+
+    def _upload(self, name, content, client=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(name, content)
+        return (client or self.client_).post(
+            "/files/",
+            {"book": self.book.id, "file": upload, "order": 0},
+            format="multipart",
+        )
+
+    def test_epub_upload_is_accepted_and_parsed(self):
+        res = self._upload("story.epub", self._epub_bytes())
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["fmt"], "epub")
+
+    def test_unsupported_extension_rejected(self):
+        res = self._upload("virus.exe", b"MZ\x00\x00")
+        self.assertEqual(res.status_code, 400)
+
+    def test_list_files_filtered_by_book(self):
+        self._upload("story.epub", self._epub_bytes())
+        res = self.client_.get(f"/files/?book={self.book.id}")
+        self.assertEqual(res.status_code, 200)
+        rows = res.data["results"] if isinstance(res.data, dict) else res.data
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["book"], self.book.id)
+
+    def test_delete_then_reupload_replaces_the_file(self):
+        """The 'I picked the wrong file' flow the edit dialog implements."""
+        first = self._upload("wrong.txt", b"the wrong book entirely")
+        self.assertEqual(first.status_code, 201, first.data)
+        file_id = first.data["id"]
+
+        deleted = self.client_.delete(f"/files/{file_id}/")
+        self.assertEqual(deleted.status_code, 204)
+
+        second = self._upload("right.epub", self._epub_bytes())
+        self.assertEqual(second.status_code, 201, second.data)
+
+        rows = self.client_.get(f"/files/?book={self.book.id}").data
+        rows = rows["results"] if isinstance(rows, dict) else rows
+        self.assertEqual([r["fmt"] for r in rows], ["epub"])
+
+    def test_stranger_cannot_delete_someone_elses_file(self):
+        from rest_framework.test import APIClient
+
+        file_id = self._upload("story.epub", self._epub_bytes()).data["id"]
+        other = APIClient()
+        other.force_authenticate(user=self.stranger)
+        self.assertIn(other.delete(f"/files/{file_id}/").status_code, (403, 404))
+
+    def test_owner_can_patch_book_details(self):
+        res = self.client_.patch(
+            f"/books/{self.book.id}/",
+            {"title": "New", "author": "A", "production_year": 2021, "status": "public"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["title"], "New")
+        self.assertEqual(res.data["status"], "public")
