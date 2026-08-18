@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 
 from bookshelf.parsing import parse_document
 from bookshelf.parsing.normalize import normalize_text, split_sentences
@@ -117,7 +117,12 @@ class EpubParserTests(TestCase):
 
 
 @override_settings(TTS_PROVIDER="dummy")
-class ReaderConsumerTests(TestCase):
+class ReaderConsumerTests(TransactionTestCase):
+    # TransactionTestCase, not TestCase: the consumer touches the database from
+    # a separate thread via database_sync_to_async, which cannot see (or safely
+    # share) the transaction TestCase opens on the main thread. Against SQLite
+    # that happened to work; against Postgres it fails with
+    # "psycopg2.InterfaceError: connection already closed".
     async def test_ready_and_play_protocol(self):
         from channels.testing import WebsocketCommunicator
         from channels.db import database_sync_to_async
@@ -429,13 +434,18 @@ class BookCoverTests(TestCase):
         from bookshelf.models import Book
         from bookshelf.serializers import BookSerializer
 
+        stale = "http://stale.invalid/expired-cover.png?Signature=OLD"
         Book.objects.filter(pk=self.book.pk).update(
-            cover_path="books/1/cover.png",
-            cover_url="http://minio/expired?Signature=old&Expires=1",
+            cover_path="books/1/cover.png", cover_url=stale,
         )
         data = BookSerializer(Book.objects.get(pk=self.book.pk)).data
-        self.assertNotIn("Expires=1", data["cover_url"] or "")
-        self.assertIn("cover.png", data["cover_url"] or "")
+        fresh = data["cover_url"] or ""
+        # Use a host-based sentinel: a freshly signed S3/MinIO URL carries an
+        # "Expires=<epoch>" parameter of its own, so substring-matching on
+        # "Expires=" would match the *correct* answer too.
+        self.assertNotIn("stale.invalid", fresh)
+        self.assertNotEqual(fresh, stale)
+        self.assertIn("cover.png", fresh)
 
     def test_legacy_rows_without_a_path_still_resolve(self):
         from bookshelf.models import Book
@@ -446,3 +456,135 @@ class BookCoverTests(TestCase):
         )
         data = BookSerializer(Book.objects.get(pk=self.book.pk)).data
         self.assertEqual(data["cover_url"], "http://example.com/legacy.png")
+
+
+class ListeningTimeTests(TestCase):
+    """Measured listening time: accumulation, clamping and derived stats."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from bookshelf.models import Book
+
+        self.user = User.objects.create_user("listener", password="pw12345!")
+        self.book = Book.objects.create(title="L", user=self.user)
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.user)
+
+    def _report(self, ms, client=None):
+        return (client or self.client_).post(
+            f"/books/{self.book.id}/listening/", {"ms": ms}, format="json"
+        )
+
+    def _stats(self):
+        return self.client_.get("/api/stats/").json()
+
+    def test_reports_accumulate_across_calls(self):
+        from bookshelf.models import ReadingProgress
+
+        self.assertEqual(self._report(30_000).status_code, 202)
+        self.assertEqual(self._report(45_000).status_code, 202)
+        row = ReadingProgress.objects.get(user=self.user, book=self.book)
+        self.assertEqual(row.listened_ms, 75_000)
+        self.assertEqual(self._stats()["listening_ms"], 75_000)
+
+    def test_absurd_and_negative_deltas_are_rejected(self):
+        # A stuck client must not be able to inflate the totals without bound.
+        self.assertEqual(self._report(10 * 60 * 1000).status_code, 400)
+        self.assertEqual(self._report(0).status_code, 400)
+        self.assertEqual(self._report(-5000).status_code, 400)
+        self.assertEqual(self._stats()["listening_ms"], 0)
+
+    def test_today_and_daily_rollup(self):
+        self._report(60_000)
+        self._report(30_000)
+        stats = self._stats()
+        self.assertEqual(stats["listening_today_ms"], 90_000)
+        self.assertEqual(stats["days_listened"], 1)
+        self.assertEqual(stats["listening_daily_average_ms"], 90_000)
+
+    def test_streak_counts_consecutive_days(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from bookshelf.models import ListeningDay
+
+        today = timezone.localdate()
+        for offset in (0, 1, 2):
+            ListeningDay.objects.create(
+                user=self.user, date=today - timedelta(days=offset), listened_ms=60_000
+            )
+        # A gap at day 4 must end the streak at 3.
+        ListeningDay.objects.create(
+            user=self.user, date=today - timedelta(days=4), listened_ms=60_000
+        )
+        stats = self._stats()
+        self.assertEqual(stats["current_streak_days"], 3)
+        self.assertEqual(stats["days_listened"], 4)
+
+    def test_measurement_is_separate_from_the_estimate(self):
+        """The measured figure must not be contaminated by the old estimate."""
+        from bookshelf.models import Book, ReadingProgress
+
+        book = Book.objects.create(
+            title="Estimated", user=self.user, duration_estimate_ms=100_000
+        )
+        ReadingProgress.objects.create(
+            user=self.user, book=book, percent=50.0, listened_ms=0
+        )
+        stats = self._stats()
+        self.assertEqual(stats["estimated_listening_ms"], 50_000)
+        self.assertEqual(stats["listening_ms"], 0)
+
+    def test_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        self.assertIn(self._report(1000, client=APIClient()).status_code, (401, 403))
+
+
+class TtsChunkingTests(TestCase):
+    """Every synthesis request must stay under the provider's limits.
+
+    LINEAR_PCM at 44.1 kHz mono is ~86 KB/s, so gRPC's 4 MB default receive
+    limit is reached after only ~48s of speech. A single long paragraph blew
+    it with "RESOURCE_EXHAUSTED: Received message larger than max".
+    """
+
+    def _service(self):
+        from bookshelf.tts.nvidia import NvidiaTTSService
+
+        return NvidiaTTSService()
+
+    def test_chunks_respect_the_per_request_cap(self):
+        svc = self._service()
+        cap = svc.max_chars_per_request
+        text = "This is a sentence about startups. " * 200
+        for chunk in svc.chunk_text(text, max_bytes=cap):
+            self.assertLessEqual(len(chunk.encode("utf-8")), cap)
+
+    def test_a_single_oversized_sentence_is_hard_split(self):
+        """Sentence-boundary splitting alone leaves over-long sentences whole."""
+        svc = self._service()
+        cap = svc.max_chars_per_request
+        # No sentence punctuation at all: one "sentence" far over the cap.
+        text = ("word " * 1500).strip()
+        chunks = svc.chunk_text(text, max_bytes=cap)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk.encode("utf-8")), cap)
+        # No words may be lost or duplicated by the split.
+        self.assertEqual(" ".join(chunks).split(), text.split())
+
+    def test_cap_keeps_audio_under_the_grpc_ceiling(self):
+        from bookshelf.tts.nvidia import MAX_GRPC_RECEIVE_BYTES
+
+        svc = self._service()
+        # Pessimistic: ~8 chars/second of speech (slow, heavily normalised).
+        worst_seconds = svc.max_chars_per_request / 8
+        worst_bytes = worst_seconds * svc.sample_rate_hz * svc.SAMPLE_WIDTH_BYTES
+        self.assertLess(
+            worst_bytes, MAX_GRPC_RECEIVE_BYTES,
+            "a single request could still exceed the gRPC receive limit",
+        )
+
+    def test_short_text_is_a_single_request(self):
+        svc = self._service()
+        self.assertEqual(svc.chunk_text("Hello world.", max_bytes=1500), ["Hello world."])

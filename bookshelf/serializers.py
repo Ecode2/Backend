@@ -90,7 +90,7 @@ class SegmentSerializer(serializers.Serializer):
 
 
 class TocResponseSerializer(serializers.Serializer):
-    book_id = serializers.IntegerField()
+    book_id = serializers.UUIDField()
     book_type = serializers.CharField()
     fmt = serializers.CharField()
     total_segments = serializers.IntegerField()
@@ -135,14 +135,31 @@ class VoiceSerializer(serializers.Serializer):
     language_codes = serializers.ListField(child=serializers.CharField())
     ssml_gender = serializers.CharField()
     natural_sample_rate_hertz = serializers.IntegerField(required=False)
+    # NVIDIA encodes these in the voice id; surfaced so the UI can group by
+    # speaker and offer emotion variants instead of one flat list.
+    speaker = serializers.CharField(required=False, allow_blank=True)
+    emotion = serializers.CharField(required=False, allow_blank=True)
+    model = serializers.CharField(required=False, allow_blank=True)
+
+
+# A single heartbeat covers seconds, not minutes. Clamping the accepted delta
+# stops a stuck retry loop -- or a hostile client -- from inflating the totals.
+MAX_LISTENING_REPORT_MS = 5 * 60 * 1000
+
+
+class ListeningReportSerializer(serializers.Serializer):
+    """One slice of measured wall-clock listening time."""
+
+    ms = serializers.IntegerField(min_value=1, max_value=MAX_LISTENING_REPORT_MS)
 
 
 class LibraryStatsSerializer(serializers.Serializer):
     """Aggregate reading stats for the authenticated user.
 
-    Every field is derived from stored data. Note that wall-clock time spent
-    reading is *not* tracked anywhere, so ``estimated_listening_ms`` is an
-    estimate (narration duration x progress), not a measurement.
+    ``listening_ms`` and friends are *measured*: the player reports the
+    wall-clock time it actually spent playing, which the server accumulates.
+    ``estimated_listening_ms`` remains as a rough fallback for books listened
+    to before measurement existed.
     """
 
     books_in_library = serializers.IntegerField()
@@ -151,5 +168,14 @@ class LibraryStatsSerializer(serializers.Serializer):
     books_started = serializers.IntegerField()
     books_completed = serializers.IntegerField()
     books_in_progress = serializers.IntegerField()
-    estimated_listening_ms = serializers.IntegerField()
     bookmarks = serializers.IntegerField()
+
+    # Measured listening time.
+    listening_ms = serializers.IntegerField()
+    listening_today_ms = serializers.IntegerField()
+    listening_daily_average_ms = serializers.IntegerField()
+    days_listened = serializers.IntegerField()
+    current_streak_days = serializers.IntegerField()
+
+    # Retained estimate (narration duration x progress) for context.
+    estimated_listening_ms = serializers.IntegerField()

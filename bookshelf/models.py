@@ -5,6 +5,8 @@ unifies resume, bookmarks and progress across PDF/EPUB/DOCX/TXT documents and
 native audiobooks. Files (documents and audio) live in S3-compatible storage.
 """
 
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
@@ -32,6 +34,9 @@ AUDIO_MAX_BYTES = 1024 * 1024 * 500        # 500 MB
 
 
 class Book(models.Model):
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     user = models.ForeignKey(
@@ -97,6 +102,9 @@ def file_validation(file):
 
 
 class BookFile(models.Model):
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     book = models.ForeignKey(Book, related_name="files", on_delete=models.CASCADE)
     file = models.FileField(upload_to=handle_file_upload, validators=[file_validation])
 
@@ -112,7 +120,7 @@ class BookFile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["order", "id"]
+        ordering = ["order", "created_at"]
 
     def __str__(self):
         return f"{self.book.title} - {self.file.name}"
@@ -142,6 +150,9 @@ class BookFile(models.Model):
 class DocumentStructure(models.Model):
     """Cached parse result for a document BookFile (parse once, reuse)."""
 
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     book_file = models.OneToOneField(
         BookFile, related_name="structure", on_delete=models.CASCADE
     )
@@ -158,6 +169,9 @@ class DocumentStructure(models.Model):
 class ReadingProgress(models.Model):
     """Per-user resume anchor for a book (backend-managed, cross-device)."""
 
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="reading_progress",
         on_delete=models.CASCADE,
@@ -172,6 +186,11 @@ class ReadingProgress(models.Model):
     percent = models.FloatField(default=0.0)
     # For native audiobooks: position within the currently playing track.
     audio_ms = models.BigIntegerField(default=0)
+    # Wall-clock milliseconds actually spent listening to this book. Only the
+    # client can measure this (the server cannot distinguish a pause from a
+    # buffering gap, and native audiobooks never touch the WebSocket), so it is
+    # accumulated from client-reported deltas rather than derived.
+    listened_ms = models.BigIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -183,6 +202,9 @@ class ReadingProgress(models.Model):
 
 
 class Bookmark(models.Model):
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="bookmarks", on_delete=models.CASCADE
     )
@@ -209,6 +231,9 @@ THEME_CHOICES = [("light", "Light"), ("sepia", "Sepia"), ("dark", "Dark"), ("nig
 class ReaderSettings(models.Model):
     """Global per-user reader defaults."""
 
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, related_name="reader_settings",
         on_delete=models.CASCADE,
@@ -236,6 +261,9 @@ class ReaderSettings(models.Model):
 class AudioSegmentCache(models.Model):
     """Deduped synthesized audio, keyed by sha256(text|voice|encoding)."""
 
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     cache_key = models.CharField(max_length=64, unique=True, db_index=True)
     storage_url = models.URLField(max_length=1024)
     storage_path = models.CharField(max_length=1024, blank=True)
@@ -253,6 +281,9 @@ class AudioSegmentCache(models.Model):
 class AudioChapter(models.Model):
     """Chapter marker for a native audiobook (from m4b/ID3 or file boundary)."""
 
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
     book = models.ForeignKey(
         Book, related_name="audio_chapters", on_delete=models.CASCADE
     )
@@ -270,3 +301,28 @@ class AudioChapter(models.Model):
 
     def __str__(self):
         return f"AudioChapter<{self.book_id}> {self.index}: {self.title}"
+
+
+class ListeningDay(models.Model):
+    """Daily roll-up of measured listening time, one row per user per day.
+
+    Storing a roll-up rather than individual heartbeats keeps the table small
+    while still supporting "today", daily averages and streaks.
+    """
+
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="listening_days",
+        on_delete=models.CASCADE,
+    )
+    date = models.DateField(db_index=True)
+    listened_ms = models.BigIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("user", "date")
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"ListeningDay<{self.user_id} {self.date} {self.listened_ms}ms>"

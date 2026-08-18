@@ -52,15 +52,37 @@ class TTSService(ABC):
             return [text]
         chunks, current = [], ""
         for sentence in split_sentences(text) or [text]:
-            candidate = f"{current} {sentence}".strip()
-            if len(candidate.encode("utf-8")) > max_bytes and current:
-                chunks.append(current)
-                current = sentence
-            else:
-                current = candidate
+            # A single sentence can exceed the limit on its own (lists, tables
+            # and badly punctuated PDF text all produce these). Packing it
+            # whole would silently hand the provider an oversized request, so
+            # hard-split it on word boundaries first.
+            for piece in self._split_oversized(sentence, max_bytes):
+                candidate = f"{current} {piece}".strip()
+                if len(candidate.encode("utf-8")) > max_bytes and current:
+                    chunks.append(current)
+                    current = piece
+                else:
+                    current = candidate
         if current:
             chunks.append(current)
         return chunks
+
+    @staticmethod
+    def _split_oversized(sentence: str, max_bytes: int) -> list[str]:
+        """Break a single over-long sentence into <= max_bytes pieces."""
+        if len(sentence.encode("utf-8")) <= max_bytes:
+            return [sentence]
+        pieces, current = [], ""
+        for word in sentence.split():
+            candidate = f"{current} {word}".strip()
+            if len(candidate.encode("utf-8")) > max_bytes and current:
+                pieces.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            pieces.append(current)
+        return pieces
 
     @staticmethod
     def probe_duration_ms(audio: bytes, encoding: str = "MP3") -> int:

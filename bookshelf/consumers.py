@@ -28,7 +28,8 @@ LOOKAHEAD = 2               # segments to stay ahead of paced playback
 
 class ReaderConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.book_id = int(self.scope["url_route"]["kwargs"]["book_id"])
+        # Book primary keys are UUIDs; keep the raw string (int() raised here).
+        self.book_id = self.scope["url_route"]["kwargs"]["book_id"]
         self.user = self.scope.get("user")
         self.play_task: asyncio.Task | None = None
         self.position = 0

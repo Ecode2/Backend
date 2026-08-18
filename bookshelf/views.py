@@ -10,7 +10,9 @@ Bug fixes vs. the original (Section 2 of the spec):
   * Single ``cache_with_prefix`` definition.
 """
 
-from django.db.models import Count, ExpressionWrapper, F, FloatField, Q, Sum
+from django.db.models import Avg, Count, ExpressionWrapper, F, FloatField, Q, Sum
+from django.utils import timezone
+from datetime import timedelta
 from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from django.views.decorators.cache import cache_page
@@ -23,7 +25,9 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from . import services
 from .filters import BookFileFilter
-from .models import Book, BookFile, Bookmark, ReaderSettings, ReadingProgress
+from .models import (
+    Book, BookFile, Bookmark, ListeningDay, ReaderSettings, ReadingProgress,
+)
 from .permissions import IsBookCreator, IsFileAuthor, PublicOrPrivate
 from .serializers import (
     AudioChapterSerializer,
@@ -31,6 +35,7 @@ from .serializers import (
     BookSerializer,
     BookmarkSerializer,
     LibraryStatsSerializer,
+    ListeningReportSerializer,
     ReaderSettingsSerializer,
     ReadingProgressSerializer,
     SegmentSerializer,
@@ -203,6 +208,41 @@ class BookViewSet(viewsets.ModelViewSet):
         serializer.save(user=request.user, book=book)
         return response.Response(serializer.data)
 
+    # -- measured listening time -----------------------------------------
+    @extend_schema(
+        request=ListeningReportSerializer, responses=ListeningReportSerializer
+    )
+    @action(detail=True, methods=["post"], url_path="listening")
+    def listening(self, request, pk=None):
+        """Accumulate a client-reported slice of wall-clock listening time.
+
+        The client sends the milliseconds it actually spent playing since its
+        last report. Deltas are clamped: a heartbeat should never legitimately
+        exceed a couple of minutes, and accepting arbitrary values would let a
+        buggy (or hostile) client inflate the stats without bound.
+        """
+        book = self.get_object()
+        serializer = ListeningReportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        delta = serializer.validated_data["ms"]
+
+        progress, _ = ReadingProgress.objects.get_or_create(
+            user=request.user, book=book
+        )
+        ReadingProgress.objects.filter(pk=progress.pk).update(
+            listened_ms=F("listened_ms") + delta
+        )
+
+        today = timezone.localdate()
+        day, created = ListeningDay.objects.get_or_create(
+            user=request.user, date=today, defaults={"listened_ms": delta}
+        )
+        if not created:
+            ListeningDay.objects.filter(pk=day.pk).update(
+                listened_ms=F("listened_ms") + delta
+            )
+        return response.Response({"ms": delta}, status=status.HTTP_202_ACCEPTED)
+
     # -- bookmarks -------------------------------------------------------
     @extend_schema(request=BookmarkSerializer, responses=BookmarkSerializer(many=True))
     @action(detail=True, methods=["get", "post"], url_path="bookmarks")
@@ -288,9 +328,8 @@ class LibraryStatsView(APIView):
             books.values_list("book_type").annotate(n=Count("id")).values_list("book_type", "n")
         )
 
-        # Wall-clock reading time is not recorded, so approximate listened time
-        # as narration duration x fraction completed.
-        listened = progress.aggregate(
+        # Retained estimate for books listened to before measurement existed.
+        estimated = progress.aggregate(
             ms=Sum(
                 ExpressionWrapper(
                     Coalesce(F("book__duration_estimate_ms"), 0) * F("percent") / 100.0,
@@ -298,6 +337,28 @@ class LibraryStatsView(APIView):
                 )
             )
         )["ms"] or 0.0
+
+        # Measured: accumulated from the player's wall-clock reports.
+        measured = progress.aggregate(ms=Sum("listened_ms"))["ms"] or 0
+
+        days = list(
+            ListeningDay.objects.filter(user=user, listened_ms__gt=0)
+            .order_by("-date")
+            .values_list("date", "listened_ms")
+        )
+        today = timezone.localdate()
+        today_ms = next((ms for d, ms in days if d == today), 0)
+        daily_average = round(sum(ms for _, ms in days) / len(days)) if days else 0
+
+        # Streak counts back from today (or yesterday, so an evening session
+        # is not "broken" simply because today has not started yet).
+        streak = 0
+        if days:
+            cursor = today if days[0][0] == today else today - timedelta(days=1)
+            listened_dates = {d for d, _ in days}
+            while cursor in listened_dates:
+                streak += 1
+                cursor -= timedelta(days=1)
 
         data = {
             "books_in_library": books.count(),
@@ -308,8 +369,13 @@ class LibraryStatsView(APIView):
             "books_in_progress": progress.filter(
                 percent__gt=0, percent__lt=COMPLETED_PERCENT
             ).count(),
-            "estimated_listening_ms": int(listened),
             "bookmarks": Bookmark.objects.filter(user=user).count(),
+            "listening_ms": int(measured),
+            "listening_today_ms": int(today_ms),
+            "listening_daily_average_ms": int(daily_average),
+            "days_listened": len(days),
+            "current_streak_days": streak,
+            "estimated_listening_ms": int(estimated),
         }
         return response.Response(LibraryStatsSerializer(data).data)
 

@@ -29,7 +29,8 @@ apt-get install -y \
   postgresql postgresql-contrib redis-server nginx \
   python3-venv python3-dev build-essential libpq-dev git curl \
   certbot python3-certbot-nginx \
-  libxml2-dev libxslt1-dev zlib1g-dev libjpeg-dev
+  libxml2-dev libxslt1-dev zlib1g-dev libjpeg-dev \
+  ffmpeg
 
 # --- 2. App user + directories ---------------------------------------------
 if ! id "${APP_USER}" >/dev/null 2>&1; then
@@ -168,9 +169,26 @@ systemctl daemon-reload
 systemctl enable --now bookverse.service
 
 # --- 10. Nginx site ---------------------------------------------------------
-log "Installing Nginx site..."
-install -m 644 "${APP_DIR}/deploy/nginx/bookverse.conf" /etc/nginx/sites-available/bookverse.conf
-ln -sf /etc/nginx/sites-available/bookverse.conf /etc/nginx/sites-enabled/bookverse.conf
+# certbot --nginx does NOT write a separate file: it rewrites this very site
+# in place, adding the `listen 443 ssl` block, the certificate paths and the
+# HTTP->HTTPS redirect. Overwriting it unconditionally therefore reverted the
+# server to plain HTTP on every run -- the certificate stayed valid on disk
+# while nginx quietly stopped serving it. So only install the template when
+# TLS has not been applied yet, and never clobber certbot's edits.
+NGINX_SITE="/etc/nginx/sites-available/bookverse.conf"
+if grep -qE "listen[[:space:]]+.*443|ssl_certificate" "${NGINX_SITE}" 2>/dev/null; then
+  log "Nginx site already has TLS (certbot-managed) — leaving it untouched."
+  if ! diff -q "${APP_DIR}/deploy/nginx/bookverse.conf" "${NGINX_SITE}" >/dev/null 2>&1; then
+    install -m 644 "${APP_DIR}/deploy/nginx/bookverse.conf" "${NGINX_SITE}.repo-template"
+    warn "Repo nginx template differs from the live site; the new version was"
+    warn "written to ${NGINX_SITE}.repo-template for you to merge by hand."
+    warn "After merging run: sudo certbot --nginx -d <your-domain>"
+  fi
+else
+  log "Installing Nginx site..."
+  install -m 644 "${APP_DIR}/deploy/nginx/bookverse.conf" "${NGINX_SITE}"
+fi
+ln -sf "${NGINX_SITE}" /etc/nginx/sites-enabled/bookverse.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx

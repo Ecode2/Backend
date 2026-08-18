@@ -40,7 +40,7 @@ def env_list(name: str, default: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # Core security
 # ---------------------------------------------------------------------------
-DEBUG = env_bool("DEBUG", False)
+DEBUG = env_bool("DEBUG", True)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
@@ -333,6 +333,35 @@ REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "bv_refresh")
 REFRESH_COOKIE_SECURE = env_bool("REFRESH_COOKIE_SECURE", not DEBUG)
 REFRESH_COOKIE_SAMESITE = os.getenv("REFRESH_COOKIE_SAMESITE", "Lax")
 
+# Local development is served over plain HTTP from localhost/127.0.0.1, where
+# production cookie flags make the refresh cookie *impossible to store*:
+#   - Domain=.example.com does not match the request host, so the browser
+#     discards the cookie outright;
+#   - Secure cookies are never stored over http://.
+# Since .env is normally copied from the production template, silently honouring
+# those values means every full page reload logs the developer out with no error
+# anywhere. Override them in DEBUG rather than require a hand-edited .env.
+if DEBUG:
+    if COOKIE_DOMAIN and not COOKIE_DOMAIN.lstrip(".").startswith(("localhost", "127.0.0.1")):
+        import warnings
+
+        warnings.warn(
+            f"DEBUG: ignoring COOKIE_DOMAIN={COOKIE_DOMAIN!r} -- the browser "
+            "would reject a cookie scoped to that domain when served from "
+            "localhost, so the refresh cookie would never be stored.",
+            stacklevel=1,
+        )
+        COOKIE_DOMAIN = None
+    if REFRESH_COOKIE_SECURE:
+        import warnings
+
+        warnings.warn(
+            "DEBUG: forcing REFRESH_COOKIE_SECURE=False -- a Secure cookie is "
+            "not stored over plain HTTP, which silently breaks session refresh.",
+            stacklevel=1,
+        )
+        REFRESH_COOKIE_SECURE = False
+
 # Short-lived signed ticket used to authenticate the audio WebSocket.
 WS_TICKET_TTL_SECONDS = int(os.getenv("WS_TICKET_TTL_SECONDS", "30"))
 
@@ -343,7 +372,12 @@ WS_TICKET_TTL_SECONDS = int(os.getenv("WS_TICKET_TTL_SECONDS", "30"))
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "nvidia")  # "nvidia" | "google" | "piper" | "dummy"
 TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "Magpie-Multilingual.EN-US.Aria")
 TTS_DEFAULT_LANGUAGE = os.getenv("TTS_DEFAULT_LANGUAGE", "en-US")
-TTS_AUDIO_ENCODING = os.getenv("TTS_AUDIO_ENCODING", "MP3")  # MP3 | OGG_OPUS
+# Container delivered to the browser. MP3 is the safe default: it is the one
+# lossy format every target browser (notably iOS Safari) decodes reliably via
+# decodeAudioData(). Providers returning raw PCM compress to this.
+TTS_AUDIO_ENCODING = os.getenv("TTS_AUDIO_ENCODING", "MP3")  # MP3 | OGG_OPUS | AAC | WAV
+# ~48 kbps mono is transparent for speech and ~15x smaller than raw WAV.
+TTS_AUDIO_BITRATE = os.getenv("TTS_AUDIO_BITRATE", "48k")
 TTS_MAX_INPUT_BYTES = int(os.getenv("TTS_MAX_INPUT_BYTES", "4500"))
 # NVIDIA Riva engine config (only used when TTS_PROVIDER=nvidia). NVIDIA's
 # hosted TTS models are served over gRPC and selected by a "function-id"
