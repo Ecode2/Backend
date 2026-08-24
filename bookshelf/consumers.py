@@ -38,6 +38,9 @@ class ReaderConsumer(AsyncWebsocketConsumer):
         self.segments: list[dict] = []
         self.toc: list[dict] = []
 
+        # Listening requires an account: narration costs real TTS spend, and
+        # progress/bookmarks are per-user. Reading a public book without an
+        # account is served by the REST endpoints, not this socket.
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4401)
             return
@@ -172,12 +175,35 @@ class ReaderConsumer(AsyncWebsocketConsumer):
             prev_duration = 0.0
             for offset, index in enumerate(range(start_index, len(self.segments))):
                 seg = self.segments[index]
-                try:
-                    meta = await self._synthesize(seg["text"])
-                except Exception:
-                    logger.exception("synthesis failed for segment %s", index)
-                    await self._error("synthesis_failed", f"segment {index}")
-                    return
+                meta = None
+                # One unsynthesizable paragraph must not end the book. Retry
+                # once (failures are often transient -- a dropped gRPC stream
+                # or a rate limit), then skip it and keep going. Previously
+                # this returned, so playback stopped dead at the bad segment.
+                for attempt in (1, 2):
+                    try:
+                        meta = await self._synthesize(seg["text"])
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "synthesis attempt %s/2 failed for segment %s",
+                            attempt, index, exc_info=(attempt == 2),
+                        )
+                        if attempt == 1:
+                            await asyncio.sleep(0.5)
+
+                if meta is None:
+                    # Non-fatal: tell the client which segment was dropped so it
+                    # can surface a hint, then continue with the next one.
+                    await self._send_json({
+                        "type": "segment_skipped",
+                        "segment_index": index,
+                        "reason": "synthesis_failed",
+                    })
+                    self.position = index
+                    continue
 
                 await self._send_json({
                     "type": "segment_meta",

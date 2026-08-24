@@ -381,7 +381,11 @@ class LibraryStatsView(APIView):
 
 
 class VoicesView(APIView):
-    """List available TTS voices (proxied + cached). GET /api/voices/?language="""
+    """List available TTS voices (proxied + cached). GET /api/voices/?language=
+
+    Authenticated: the narrator picker only appears while listening, which
+    itself requires an account, and this proxies a paid upstream API.
+    """
 
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "tts"

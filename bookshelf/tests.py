@@ -588,3 +588,146 @@ class TtsChunkingTests(TestCase):
     def test_short_text_is_a_single_request(self):
         svc = self._service()
         self.assertEqual(svc.chunk_text("Hello world.", max_bytes=1500), ["Hello world."])
+
+
+@override_settings(TTS_PROVIDER="dummy")
+class StreamResilienceTests(TransactionTestCase):
+    """One unsynthesizable paragraph must not end the book.
+
+    _stream_from used to `return` on the first synthesis failure, so playback
+    stopped dead at that segment (reported in production as "I get a segment
+    79"). It should retry, then skip and carry on.
+    """
+
+    async def test_failed_segment_is_skipped_and_streaming_continues(self):
+        from unittest.mock import patch as mock_patch
+        from channels.testing import WebsocketCommunicator
+        from channels.db import database_sync_to_async
+        from system.asgi import application
+        from bookshelf.models import Book, BookFile
+        from bookshelf.services import get_or_build_structure
+        from bookshelf.ws_auth import make_ws_ticket
+
+        @database_sync_to_async
+        def setup():
+            user = User.objects.create_user("resilient", password="pw12345!")
+            book = Book.objects.create(title="R", user=user, status="public")
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                f.write("First para here.\n\nSecond para here.\n\nThird para here.")
+                path = f.name
+            from django.core.files import File as DjangoFile
+            with open(path, "rb") as fh:
+                bf = BookFile(book=book)
+                bf.file.save("r.txt", DjangoFile(fh), save=True)
+            os.remove(path)
+            get_or_build_structure(bf)
+            return user, book
+
+        user, book = await setup()
+        ticket = await database_sync_to_async(make_ws_ticket)(user)
+
+        real = None
+        calls = {"n": 0}
+
+        def flaky(text, voice, language=None):
+            # Fail every attempt for the *second* paragraph only; the retry
+            # must also fail so we exercise the skip path.
+            if "Second" in text:
+                raise RuntimeError("synthetic synthesis failure")
+            return real(text, voice, language)
+
+        from bookshelf import tts as tts_module
+        real = tts_module.synthesize_segment
+
+        with mock_patch.object(tts_module, "synthesize_segment", side_effect=flaky):
+            communicator = WebsocketCommunicator(
+                application, f"/ws/reader/{book.id}/?ticket={ticket}"
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await communicator.receive_json_from()  # ready
+
+            await communicator.send_json_to({"action": "play", "segment_index": 0})
+
+            seen_indexes, skipped, audio_frames = [], [], 0
+            for _ in range(24):
+                try:
+                    msg = await communicator.receive_from(timeout=10)
+                except Exception:
+                    break
+                if isinstance(msg, bytes):
+                    audio_frames += 1
+                    continue
+                import json as _json
+                frame = _json.loads(msg)
+                if frame.get("type") == "segment_meta":
+                    seen_indexes.append(frame["segment_index"])
+                elif frame.get("type") == "segment_skipped":
+                    skipped.append(frame["segment_index"])
+                elif frame.get("type") == "ended":
+                    break
+
+            await communicator.disconnect()
+
+        self.assertEqual(skipped, [1], "the failing paragraph should be reported as skipped")
+        self.assertIn(2, seen_indexes, "streaming must continue past the failure")
+        self.assertGreaterEqual(audio_frames, 2, "surviving segments still deliver audio")
+
+
+class AnonymousPublicAccessTests(TestCase):
+    """A public book must be *readable* without an account.
+
+    Listening is deliberately not: narration costs real TTS spend and progress
+    is per-user, so the WebSocket ticket stays authenticated-only.
+    """
+
+    def setUp(self):
+        from bookshelf.models import Book
+
+        self.owner = User.objects.create_user("anonowner", password="pw12345!")
+        self.public = Book.objects.create(
+            title="Shared", user=self.owner, status="public",
+        )
+        self.private = Book.objects.create(
+            title="Hidden", user=self.owner, status="private",
+        )
+
+    def _anon(self):
+        from rest_framework.test import APIClient
+
+        return APIClient()
+
+    def test_public_book_is_listed_and_readable_anonymously(self):
+        c = self._anon()
+        self.assertEqual(c.get(f"/books/{self.public.id}/").status_code, 200)
+        titles = [b["title"] for b in c.get("/books/").json()["results"]]
+        self.assertIn("Shared", titles)
+
+    def test_private_book_is_not_exposed_anonymously(self):
+        c = self._anon()
+        self.assertEqual(c.get(f"/books/{self.private.id}/").status_code, 404)
+        titles = [b["title"] for b in c.get("/books/").json()["results"]]
+        self.assertNotIn("Hidden", titles)
+
+    def test_listening_requires_an_account(self):
+        """Narration is paid + per-user, so the ws ticket stays gated."""
+        c = self._anon()
+        self.assertIn(c.post("/auth/ws-ticket/", {}, format="json").status_code, (401, 403))
+        # The narrator picker only appears while listening.
+        self.assertIn(c.get("/api/voices/").status_code, (401, 403))
+
+    def test_a_used_ticket_cannot_be_replayed(self):
+        from bookshelf.ws_auth import _consume_ticket, make_ws_ticket
+
+        ticket = make_ws_ticket(self.owner)
+        first = _consume_ticket(ticket)
+        self.assertIsNotNone(first)
+        self.assertEqual(first.get("uid"), self.owner.id)
+        self.assertIsNone(_consume_ticket(ticket), "tickets are single use")
+
+    def test_writes_still_require_an_account(self):
+        c = self._anon()
+        self.assertIn(c.post("/books/", {"title": "X"}, format="json").status_code, (401, 403))
+        self.assertIn(c.delete(f"/books/{self.public.id}/").status_code, (401, 403))
+        self.assertIn(c.get("/api/stats/").status_code, (401, 403))
+        self.assertIn(c.get(f"/books/{self.public.id}/progress/").status_code, (401, 403))

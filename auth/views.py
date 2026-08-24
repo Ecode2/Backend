@@ -109,7 +109,12 @@ class LogoutView(APIView):
 
 
 class WsTicketView(APIView):
-    """Mint a short-lived, single-use ticket for the audio WebSocket."""
+    """Mint a short-lived, single-use ticket for the audio WebSocket.
+
+    Listening requires an account: narration costs real TTS spend, and progress
+    and bookmarks are per-user. Reading a public book needs no account -- that
+    path is served by the REST endpoints, not this ticket.
+    """
 
     permission_classes = [permissions.IsAuthenticated]
 

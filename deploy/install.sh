@@ -190,6 +190,38 @@ else
 fi
 ln -sf "${NGINX_SITE}" /etc/nginx/sites-enabled/bookverse.conf
 rm -f /etc/nginx/sites-enabled/default
+
+# Upload limits live at the *http* level, not in the site file.
+#
+# `client_max_body_size` is not inherited between server blocks, and nginx's
+# built-in default is only 1 MB. The site template sets it, but certbot adds a
+# second (443) server block, and any block that lacks the directive silently
+# falls back to 1 MB -- so every upload over HTTPS larger than 1 MB failed with
+# "413 Request Entity Too Large" while local HTTP uploads worked fine.
+#
+# Writing it to conf.d puts it in the http context, where it applies to every
+# server block including anything certbot generates later. This file is ours
+# alone, so it is safe to rewrite on every run.
+log "Configuring nginx upload limits (http level)..."
+cat > /etc/nginx/conf.d/bookverse-uploads.conf <<'EOF'
+# Managed by deploy/install.sh -- do not edit by hand.
+# Books are capped at 50 MB and audiobooks at 500 MB in the application
+# (see DOCUMENT_MAX_BYTES / AUDIO_MAX_BYTES); leave headroom above that so the
+# app returns a clean validation error instead of nginx cutting the connection.
+client_max_body_size 600M;
+
+# Large uploads over a slow mobile link must not be killed mid-body.
+client_body_timeout 300s;
+send_timeout 300s;
+
+# nginx buffers the request body to disk before proxying, so the app can be
+# handed a multi-hundred-MB audiobook well after the client finished sending.
+proxy_read_timeout 300s;
+proxy_send_timeout 300s;
+proxy_connect_timeout 60s;
+EOF
+chmod 644 /etc/nginx/conf.d/bookverse-uploads.conf
+
 nginx -t
 systemctl reload nginx
 

@@ -21,12 +21,25 @@ _SALT = "bookverse.ws.ticket"
 
 
 def make_ws_ticket(user) -> str:
-    """Mint a signed, timestamped ticket for ``user``."""
-    return signing.dumps({"uid": user.id}, salt=_SALT)
+    """Mint a signed, timestamped ticket.
+
+    Anonymous visitors get a ticket with ``uid: None`` so they can stream a
+    *public* book. The ticket is still signed and single-use, so it is not a
+    way around the access checks -- the consumer re-verifies that the book is
+    public before serving anything.
+    """
+    uid = user.id if getattr(user, "is_authenticated", False) else None
+    return signing.dumps({"uid": uid}, salt=_SALT)
 
 
 def _consume_ticket(ticket: str):
-    """Validate + single-use-consume a ticket; return user id or None."""
+    """Validate + single-use-consume a ticket.
+
+    Returns the decoded payload, or ``None`` when the ticket is invalid,
+    expired or already used. Note the payload itself is returned rather than
+    the user id, because ``uid: None`` is a *valid* anonymous ticket and must
+    be distinguishable from a rejected one.
+    """
     ttl = getattr(settings, "WS_TICKET_TTL_SECONDS", 30)
     try:
         data = signing.loads(ticket, salt=_SALT, max_age=ttl)
@@ -36,7 +49,7 @@ def _consume_ticket(ticket: str):
     claim_key = f"ws_ticket_used:{signing.Signer(salt=_SALT).signature(ticket)}"
     if not cache.add(claim_key, "1", timeout=ttl + 5):
         return None
-    return data.get("uid")
+    return data
 
 
 @database_sync_to_async
@@ -58,11 +71,18 @@ class TicketAuthMiddleware:
         query = parse_qs((scope.get("query_string") or b"").decode())
         ticket = (query.get("ticket") or [None])[0]
         user = AnonymousUser()
+        # `ticket_valid` separates "no/!bad ticket" from "valid anonymous
+        # ticket"; only the latter may reach a public book.
+        ticket_valid = False
         if ticket:
-            uid = _consume_ticket(ticket)
-            if uid is not None:
-                user = await _get_user(uid)
+            data = _consume_ticket(ticket)
+            if data is not None:
+                ticket_valid = True
+                uid = data.get("uid")
+                if uid is not None:
+                    user = await _get_user(uid)
         scope["user"] = user
+        scope["ws_ticket_valid"] = ticket_valid
         return await self.app(scope, receive, send)
 
 
