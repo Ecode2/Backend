@@ -40,11 +40,21 @@ fi
 mkdir -p "${APP_HOME}"
 # Sync the repo into APP_DIR (rsync if available; else copy).
 mkdir -p "${APP_DIR}"
+# NB: .env is excluded deliberately. It is gitignored, so it is untracked --
+# but rsync copies untracked files, and a developer checkout on the server
+# usually has one. Landing it in APP_DIR (the process CWD) would shadow the
+# canonical ${ENV_FILE} that systemd injects.
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --delete --exclude venv --exclude db.sqlite3 "${REPO_DIR}/" "${APP_DIR}/"
+  rsync -a --delete \
+    --exclude venv --exclude env --exclude db.sqlite3 \
+    --exclude '.env' --exclude '.env.*' \
+    "${REPO_DIR}/" "${APP_DIR}/"
 else
   cp -r "${REPO_DIR}/." "${APP_DIR}/"
 fi
+# Excluded paths are protected from --delete, so remove any copy left by an
+# earlier run explicitly.
+rm -f "${APP_DIR}/.env"
 chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}"
 
 # --- 3. .env ----------------------------------------------------------------

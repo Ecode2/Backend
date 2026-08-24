@@ -14,7 +14,14 @@ import os
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 
-load_dotenv(override=True)
+# override=False on purpose: in production systemd injects the canonical
+# /opt/bookverse/.env via EnvironmentFile, and the process CWD is the app
+# directory. With override=True any stray .env sitting next to the code would
+# silently *replace* those values, so the server would run on whatever
+# configuration happened to be in the deployed checkout. Real environment
+# variables win; .env only fills in what is missing (which is what local
+# development needs anyway).
+load_dotenv(override=False)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -361,6 +368,70 @@ if DEBUG:
             stacklevel=1,
         )
         REFRESH_COOKIE_SECURE = False
+
+# ---------------------------------------------------------------------------
+# Uploads
+#
+# Set explicitly rather than relying on Django's defaults, because a bare
+# "Bad Request (400)" from a SuspiciousOperation is very hard to diagnose in
+# production. Note DATA_UPLOAD_MAX_MEMORY_SIZE does NOT cover multipart *file*
+# fields -- it guards ordinary form data, plus any code that touches
+# request.body -- so raising it does not weaken the per-file size limits in
+# bookshelf.models (50MB documents / 500MB audio).
+# ---------------------------------------------------------------------------
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(
+    os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(20 * 1024 * 1024))
+)
+# Files larger than this stream to a temp file instead of being held in RAM.
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(
+    os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(5 * 1024 * 1024))
+)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = int(
+    os.getenv("DATA_UPLOAD_MAX_NUMBER_FIELDS", "2000")
+)
+
+
+# ---------------------------------------------------------------------------
+# Logging
+#
+# Django's built-in console handler carries a `require_debug_true` filter, so
+# with DEBUG=False *nothing* reaches stdout -- including the django.security
+# warnings raised for SuspiciousOperation (RequestDataTooBig, DisallowedHost,
+# malformed multipart). Those surface to the client as a bare "Bad Request
+# (400)" with no server-side trace at all, which makes upload failures
+# effectively undebuggable. Log to stdout unconditionally so journalctl has it.
+# ---------------------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        # 4xx raised by Django itself (SuspiciousOperation and friends).
+        "django.request": {
+            "handlers": ["console"], "level": "WARNING", "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console"], "level": "WARNING", "propagate": False,
+        },
+        "bookshelf": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+    },
+}
+
 
 # Short-lived signed ticket used to authenticate the audio WebSocket.
 WS_TICKET_TTL_SECONDS = int(os.getenv("WS_TICKET_TTL_SECONDS", "30"))

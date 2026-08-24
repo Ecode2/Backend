@@ -54,8 +54,18 @@ def process_uploaded_file(book_file: BookFile) -> None:
 # ---------------------------------------------------------------------------
 # Document structure (parse once, cache)
 # ---------------------------------------------------------------------------
+class NoReadableFile(Exception):
+    """A book has no document file that can be parsed."""
+
+
 def get_or_build_structure(book_file: BookFile, force: bool = False) -> DocumentStructure:
-    """Return the cached parse for ``book_file``, building it if stale/missing."""
+    """Return the cached parse for ``book_file``, building it if stale/missing.
+
+    Raises ``NoReadableFile`` when there is nothing to parse, so callers get a
+    meaningful error instead of an AttributeError deep in the parser.
+    """
+    if book_file is None:
+        raise NoReadableFile("This book has no uploaded file to read.")
     structure = DocumentStructure.objects.filter(book_file=book_file).first()
     if (
         structure
@@ -84,6 +94,11 @@ def get_or_build_structure(book_file: BookFile, force: bool = False) -> Document
 
 
 def _parse_file(book_file: BookFile) -> tuple[list[Segment], list[TocEntry]]:
+    if book_file is None:
+        # Reached when a Book row exists with no BookFile -- e.g. the book was
+        # created but its upload failed. Previously this surfaced as a bare
+        # "AttributeError: 'NoneType' object has no attribute 'fmt'".
+        raise NoReadableFile("This book has no uploaded file to read.")
     fmt = book_file.fmt or "txt"
     with local_copy(book_file.file, suffix=f".{fmt}") as path:
         return parse_document(path, fmt)

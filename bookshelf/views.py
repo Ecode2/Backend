@@ -86,7 +86,12 @@ class BookViewSet(viewsets.ModelViewSet):
         book_file = book.primary_file()
         if not book_file or book_file.is_audio:
             return None
-        return services.get_or_build_structure(book_file)
+        try:
+            return services.get_or_build_structure(book_file)
+        except services.NoReadableFile:
+            # Callers already render a 404 for a missing structure; a book with
+            # no usable file is the same situation, not a server error.
+            return None
 
     @extend_schema(
         parameters=[OpenApiParameter("page", type=int, description="1-based PDF page")]

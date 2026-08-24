@@ -731,3 +731,81 @@ class AnonymousPublicAccessTests(TestCase):
         self.assertIn(c.delete(f"/books/{self.public.id}/").status_code, (401, 403))
         self.assertIn(c.get("/api/stats/").status_code, (401, 403))
         self.assertIn(c.get(f"/books/{self.public.id}/progress/").status_code, (401, 403))
+
+
+class BookWithoutFileTests(TestCase):
+    """A Book row with no BookFile must not crash the reader.
+
+    Seen in production as:
+        File ".../services.py", line 87, in _parse_file
+            fmt = book_file.fmt or "txt"
+        AttributeError: 'NoneType' object has no attribute 'fmt'
+
+    It happens whenever the book is created but its upload fails, which left
+    an empty book that 500'd the REST endpoints and killed the WebSocket.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from bookshelf.models import Book
+
+        self.user = User.objects.create_user("emptybook", password="pw12345!")
+        self.book = Book.objects.create(title="No file", user=self.user)
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.user)
+
+    def test_structure_raises_a_meaningful_error(self):
+        from bookshelf.services import NoReadableFile, get_or_build_structure
+
+        with self.assertRaises(NoReadableFile):
+            get_or_build_structure(None)
+
+    def test_toc_returns_404_not_500(self):
+        res = self.client_.get(f"/books/{self.book.id}/toc/")
+        self.assertEqual(res.status_code, 404)
+
+    def test_segments_returns_404_not_500(self):
+        res = self.client_.get(f"/books/{self.book.id}/segments/")
+        self.assertEqual(res.status_code, 404)
+
+    def test_pages_returns_404_not_500(self):
+        self.assertEqual(
+            self.client_.get(f"/books/{self.book.id}/pages/").status_code, 404
+        )
+
+    def test_the_book_itself_is_still_retrievable(self):
+        """So the UI can show it and offer a re-upload."""
+        res = self.client_.get(f"/books/{self.book.id}/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["files"], [])
+
+
+@override_settings(TTS_PROVIDER="dummy")
+class ReaderWithoutFileTests(TransactionTestCase):
+    """The WebSocket must close cleanly for a book with no file."""
+
+    async def test_ws_closes_with_a_reason_instead_of_crashing(self):
+        from channels.testing import WebsocketCommunicator
+        from channels.db import database_sync_to_async
+        from system.asgi import application
+        from bookshelf.models import Book
+        from bookshelf.ws_auth import make_ws_ticket
+
+        @database_sync_to_async
+        def setup():
+            user = User.objects.create_user("wsempty", password="pw12345!")
+            book = Book.objects.create(title="Empty", user=user, status="public")
+            return user, book
+
+        user, book = await setup()
+        ticket = await database_sync_to_async(make_ws_ticket)(user)
+        communicator = WebsocketCommunicator(
+            application, f"/ws/reader/{book.id}/?ticket={ticket}"
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected, "the socket should open, then report the problem")
+
+        frame = await communicator.receive_json_from(timeout=10)
+        self.assertEqual(frame["type"], "error")
+        self.assertEqual(frame["code"], "no_readable_file")
+        await communicator.disconnect()

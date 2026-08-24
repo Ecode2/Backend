@@ -19,6 +19,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 from .models import AUDIOBOOK, Book, ReaderSettings, ReadingProgress
+from .services import NoReadableFile
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,17 @@ class ReaderConsumer(AsyncWebsocketConsumer):
             })
             return
 
-        await self._load_structure()
+        # A book whose upload failed has no file to parse. Close with a clear
+        # reason instead of letting the exception escape the consumer.
+        if not await self._load_structure():
+            await self._send_json({
+                "type": "error",
+                "code": "no_readable_file",
+                "detail": "This book has no uploaded file yet. Re-upload it from the book page.",
+            })
+            await self.close(code=4404)
+            return
+
         await self._send_json({
             "type": "ready",
             "book_type": "document",
@@ -282,8 +293,16 @@ class ReaderConsumer(AsyncWebsocketConsumer):
         structure = services.get_or_build_structure(book_file)
         return structure.segments, structure.toc
 
-    async def _load_structure(self):
-        self.segments, self.toc = await database_sync_to_async(self._load_structure_sync)()
+    async def _load_structure(self) -> bool:
+        """Populate segments/toc. Returns False when the book has no file."""
+        try:
+            self.segments, self.toc = await database_sync_to_async(
+                self._load_structure_sync
+            )()
+            return True
+        except NoReadableFile:
+            logger.warning("book %s has no readable file", self.book_id)
+            return False
 
     @database_sync_to_async
     def _load_tracks(self):
