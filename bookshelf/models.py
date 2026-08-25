@@ -12,7 +12,9 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 
-from .files import detect_format, is_audio_format, is_document_format
+from .files import (
+    detect_format, is_audio_format, is_document_format, sanitize_upload_name,
+)
 
 PUBLIC = "public"
 PRIVATE = "private"
@@ -79,7 +81,10 @@ class Book(models.Model):
 
 
 def handle_file_upload(instance, filename):
-    return f"books/{instance.book.id}/{filename}"
+    # Never trust the client's filename in the storage key: see
+    # ``sanitize_upload_name`` for why a long dotted name used to blow up the
+    # upload with a bare 400.
+    return f"books/{instance.book.id}/{sanitize_upload_name(filename)}"
 
 
 def file_validation(file):
@@ -106,7 +111,9 @@ class BookFile(models.Model):
         primary_key=True, default=uuid.uuid4, editable=False
     )
     book = models.ForeignKey(Book, related_name="files", on_delete=models.CASCADE)
-    file = models.FileField(upload_to=handle_file_upload, validators=[file_validation])
+    file = models.FileField(
+        upload_to=handle_file_upload, max_length=255, validators=[file_validation]
+    )
 
     fmt = models.CharField(max_length=8, choices=FORMAT_CHOICES, blank=True)
     size_bytes = models.BigIntegerField(null=True, blank=True)

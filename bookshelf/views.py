@@ -10,6 +10,9 @@ Bug fixes vs. the original (Section 2 of the spec):
   * Single ``cache_with_prefix`` definition.
 """
 
+import logging
+
+from django.core.exceptions import SuspiciousFileOperation
 from django.db.models import Avg, Count, ExpressionWrapper, F, FloatField, Q, Sum
 from django.utils import timezone
 from datetime import timedelta
@@ -18,10 +21,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.views.decorators.cache import cache_page
 
 from rest_framework import filters, pagination, permissions, response, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+
+logger = logging.getLogger(__name__)
 
 from . import services
 from .filters import BookFileFilter
@@ -294,7 +300,16 @@ class BookFileViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        book_file = serializer.save()
+        try:
+            book_file = serializer.save()
+        except SuspiciousFileOperation as exc:
+            # Storage refused the key (e.g. it could not fit under the field's
+            # max_length). Django turns SuspiciousOperation into a bare 400
+            # HTML page; give the client an actionable JSON error instead.
+            logger.warning("upload rejected by storage: %s", exc)
+            raise ValidationError(
+                {"file": ["That file name could not be stored. Please rename the file and try again."]}
+            ) from exc
         # Parse/probe + cover. Synchronous: uploads are infrequent.
         services.process_uploaded_file(book_file)
 

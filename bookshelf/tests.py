@@ -10,6 +10,30 @@ from bookshelf.parsing import parse_document
 from bookshelf.parsing.normalize import normalize_text, split_sentences
 
 
+def make_epub_bytes() -> bytes:
+    """A minimal, valid single-chapter EPUB."""
+    from ebooklib import epub
+
+    book = epub.EpubBook()
+    book.set_identifier("id1")
+    book.set_title("T")
+    c1 = epub.EpubHtml(title="One", file_name="c1.xhtml")
+    c1.content = "<html><body><h1>One</h1><p>Epub body text.</p></body></html>"
+    book.add_item(c1)
+    book.toc = (epub.Link("c1.xhtml", "One", "c1"),)
+    book.spine = [c1]
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as f:
+        path = f.name
+    epub.write_epub(path, book)
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    finally:
+        os.remove(path)
+
+
 class NormalizeTests(TestCase):
     def test_hyphenated_linebreak_joined(self):
         self.assertEqual(normalize_text("exam-\nple"), "example")
@@ -253,26 +277,7 @@ class BookFileManagementTests(TestCase):
         self.client_.force_authenticate(user=self.user)
 
     def _epub_bytes(self):
-        from ebooklib import epub
-
-        book = epub.EpubBook()
-        book.set_identifier("id1")
-        book.set_title("T")
-        c1 = epub.EpubHtml(title="One", file_name="c1.xhtml")
-        c1.content = "<html><body><h1>One</h1><p>Epub body text.</p></body></html>"
-        book.add_item(c1)
-        book.toc = (epub.Link("c1.xhtml", "One", "c1"),)
-        book.spine = [c1]
-        book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as f:
-            path = f.name
-        epub.write_epub(path, book)
-        try:
-            with open(path, "rb") as fh:
-                return fh.read()
-        finally:
-            os.remove(path)
+        return make_epub_bytes()
 
     def _upload(self, name, content, client=None):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -809,3 +814,140 @@ class ReaderWithoutFileTests(TransactionTestCase):
         self.assertEqual(frame["type"], "error")
         self.assertEqual(frame["code"], "no_readable_file")
         await communicator.disconnect()
+
+
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+)
+class UploadFilenameTests(TestCase):
+    """Regression for the deployed >1MB upload failing with a bare 400.
+
+    The size was a red herring: the books that failed came from sites that
+    prefix the filename with their domain, e.g.
+    ``_OceanofPDF.com_The_Time_Machine_-_H_G_Wells.epub``. Django 5.2 computes
+    a file's extension with ``PurePath.suffixes``, so *every* dot-separated
+    segment counted as the extension -- 58 characters here. With the storage
+    key prefix (``books/<uuid>/``, 43 chars) and the collision suffix
+    (``_<7 chars>``), ``Storage.get_available_name`` truncated the stem to
+    nothing and raised ``SuspiciousFileOperation``, which Django renders as a
+    bare 400 HTML page with no useful body.
+    """
+
+    LONG_NAME = (
+        "_OceanofPDF.com_The_Time_Machine_n_The_Invisible_Man_-_H_G_Wells.epub"
+    )
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from bookshelf.models import Book
+
+        self._media = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media.cleanup)
+        override = override_settings(MEDIA_ROOT=self._media.name)
+        override.enable()
+        self.addCleanup(override.disable)
+
+        self.user = User.objects.create_user("uploader", password="pw12345!")
+        self.book = Book.objects.create(title="B", user=self.user)
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.user)
+
+    # -- unit ------------------------------------------------------------
+    def test_dotted_name_keeps_only_the_real_extension(self):
+        from bookshelf.files import sanitize_upload_name
+
+        self.assertEqual(
+            sanitize_upload_name(self.LONG_NAME),
+            # Stem capped at MAX_UPLOAD_STEM (60), so the trailing "s" is cut.
+            "oceanofpdf-com-the-time-machine-n-the-invisible-man-h-g-well.epub",
+        )
+
+    def test_name_is_bounded_and_ascii(self):
+        from bookshelf.files import MAX_UPLOAD_STEM, sanitize_upload_name
+
+        name = sanitize_upload_name("Ünïcödé " + "x" * 300 + ".PDF")
+        stem, _, ext = name.rpartition(".")
+        self.assertEqual(ext, "pdf")
+        self.assertLessEqual(len(stem), MAX_UPLOAD_STEM)
+        self.assertTrue(name.isascii())
+
+    def test_path_components_are_stripped(self):
+        from bookshelf.files import sanitize_upload_name
+
+        self.assertEqual(sanitize_upload_name("../../etc/passwd.txt"), "passwd.txt")
+        self.assertEqual(sanitize_upload_name("C:\\Users\\me\\book.epub"), "book.epub")
+
+    def test_extensionless_and_empty_names_still_produce_a_name(self):
+        from bookshelf.files import sanitize_upload_name
+
+        self.assertEqual(sanitize_upload_name("README"), "readme")
+        self.assertEqual(sanitize_upload_name(""), "file")
+        self.assertEqual(sanitize_upload_name("...."), "file")
+
+    def test_storage_key_fits_under_the_field_max_length(self):
+        """The whole point: ``get_available_name`` must not raise."""
+        from django.core.files.storage import Storage
+        from bookshelf.models import BookFile, handle_file_upload
+
+        class NeverAvailable(Storage):
+            """Worst case -- forces the collision/truncation path every time."""
+
+            def __init__(self):
+                self.calls = 0
+
+            def exists(self, name):
+                self.calls += 1
+                return self.calls <= 3
+
+        key = handle_file_upload(BookFile(book=self.book), self.LONG_NAME)
+        max_length = BookFile._meta.get_field("file").max_length
+        self.assertLessEqual(len(key), max_length)
+        available = NeverAvailable().get_available_name(key, max_length=max_length)
+        self.assertLessEqual(len(available), max_length)
+
+    # -- end to end ------------------------------------------------------
+    def test_upload_with_a_long_dotted_name_succeeds(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        res = self.client_.post(
+            "/files/",
+            {
+                "book": self.book.id,
+                "file": SimpleUploadedFile(self.LONG_NAME, make_epub_bytes()),
+                "order": 0,
+            },
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["fmt"], "epub")
+
+        from bookshelf.models import BookFile
+
+        stored = BookFile.objects.get(pk=res.data["id"]).file.name
+        self.assertTrue(stored.endswith(".epub"), stored)
+        self.assertLessEqual(len(stored), 255)
+
+    def test_storage_refusal_returns_json_not_a_bare_400(self):
+        """Belt and braces: if storage ever refuses a key, say why in JSON."""
+        from unittest import mock
+        from django.core.exceptions import SuspiciousFileOperation
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        with mock.patch(
+            "bookshelf.serializers.BookFileSerializer.save",
+            side_effect=SuspiciousFileOperation("nope"),
+        ):
+            res = self.client_.post(
+                "/files/",
+                {
+                    "book": self.book.id,
+                    "file": SimpleUploadedFile("a.txt", b"x"),
+                    "order": 0,
+                },
+                format="multipart",
+            )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("file", res.data)

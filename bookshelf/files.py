@@ -9,12 +9,20 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
 import tempfile
+import unicodedata
 
 DOCUMENT_FORMATS = {"pdf", "epub", "docx", "txt"}
 AUDIO_FORMATS = {"mp3", "m4a", "m4b", "aac", "ogg", "opus", "wav", "flac"}
 
 _EXT_ALIASES = {"text": "txt"}
+
+# Longest filename stem we keep in a storage key. The key is
+# ``books/<uuid>/<stem>.<ext>`` -- 43 characters of prefix -- and Django may
+# append ``_<7 random chars>`` on collision, so this leaves ample room under
+# ``BookFile.file``'s ``max_length``.
+MAX_UPLOAD_STEM = 60
 
 
 def detect_format(filename: str) -> str:
@@ -22,6 +30,28 @@ def detect_format(filename: str) -> str:
     ext = os.path.splitext(filename or "")[1].lower().lstrip(".")
     ext = _EXT_ALIASES.get(ext, ext)
     return ext
+
+
+def sanitize_upload_name(filename: str) -> str:
+    """Return a short, ASCII, single-extension name for an uploaded file.
+
+    Client filenames go straight into the storage key, and Django 5.2 counts
+    *every* dot-separated segment as the extension (``PurePath.suffixes``). A
+    name like ``_OceanofPDF.com_The_Time_Machine_-_H_G_Wells.epub`` therefore
+    has a 58-character "extension"; ``Storage.get_available_name`` truncates
+    the stem to nothing trying to fit ``max_length`` and raises
+    ``SuspiciousFileOperation``, which Django renders as a bare 400. Normalise
+    the name here so the key is always short, safe and predictable.
+    """
+    base = os.path.basename((filename or "").replace("\\", "/")).strip()
+    stem, raw_ext = os.path.splitext(base)
+    ext = detect_format(base) or raw_ext.lower().lstrip(".")
+    ext = re.sub(r"[^a-z0-9]", "", ext)[:8]
+
+    stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
+    stem = re.sub(r"[^A-Za-z0-9]+", "-", stem).strip("-").lower()
+    stem = stem[:MAX_UPLOAD_STEM].strip("-") or "file"
+    return f"{stem}.{ext}" if ext else stem
 
 
 def is_audio_format(fmt: str) -> bool:
