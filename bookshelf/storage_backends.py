@@ -1,4 +1,4 @@
-"""S3-compatible storage backends (MinIO on the VPS).
+"""S3-compatible storage backends (Cloudflare R2).
 
 ``MediaStorage`` holds uploaded book files and is the project ``default``
 storage. ``AudioStorage`` holds synthesized TTS audio under a separate key
@@ -26,7 +26,7 @@ def get_audio_storage():
     """Return the storage used for synthesized audio.
 
     Falls back to the project default storage when S3 is not configured (dev
-    without MinIO), so audio still persists to the local filesystem.
+    without a bucket), so audio still persists to the local filesystem.
     """
     from django.conf import settings
 

@@ -7,7 +7,7 @@ set -uo pipefail
 
 ENV_FILE="/opt/bookverse/.env"
 APP_DIR="/opt/bookverse/app"
-REQUIRED_SERVICES=(postgresql redis-server minio nginx bookverse)
+REQUIRED_SERVICES=(postgresql redis-server nginx bookverse)
 
 log()  { echo -e "\033[1;34m[restart]\033[0m $*"; }
 err()  { echo -e "\033[1;31m[error]\033[0m $*" >&2; }
@@ -28,8 +28,8 @@ if ! command -v psql >/dev/null 2>&1 && ! dpkg -s postgresql >/dev/null 2>&1; th
     sudo -u postgres psql -c "CREATE DATABASE ${PG_DB} OWNER ${PG_USER};"
 fi
 
-# --- 2/3. Postgres + Redis + MinIO active? ----------------------------------
-for svc in postgresql redis-server minio; do
+# --- 2/3. Postgres + Redis active? ----------------------------------
+for svc in postgresql redis-server; do
   if ! systemctl is-active --quiet "${svc}"; then
     log "${svc} inactive — starting..."
     systemctl start "${svc}" || err "could not start ${svc}"

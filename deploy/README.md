@@ -1,7 +1,7 @@
 # Bookverse deployment
 
 Single ASGI process (Gunicorn + UvicornWorker) serves both the REST API and the
-audio WebSocket. Object storage is **MinIO** (S3-compatible) on the same VPS.
+audio WebSocket. Object storage is **Cloudflare R2** (S3-compatible, off-box).
 
 ## VPS (Ubuntu 24.04 / 26.04, Debian 12)
 
@@ -14,7 +14,7 @@ sudo bash deploy/restart.sh      # health-checked restart + status table
 ```
 
 The first run deliberately exits after writing `.env` — provisioning Postgres
-and MinIO with the `.env.example` placeholders would leave their credentials
+with the `.env.example` placeholders would leave their credentials
 permanently out of sync with the real ones you fill in afterwards.
 
 ### Python version
@@ -26,7 +26,7 @@ with prebuilt wheels for those interpreters — if `pip` starts compiling C or
 Rust during install, a pin has drifted and should be bumped rather than
 worked around by installing compilers.
 
-`install.sh` installs Postgres, Redis, MinIO, Nginx, the venv, runs migrations +
+`install.sh` installs Postgres, Redis (capped at 64 MB), Nginx, the venv, runs migrations +
 collectstatic, and installs the systemd units and Nginx site. `restart.sh`
 self-heals a missing Postgres, refuses to restart the app on a bad Nginx config,
 and prints a per-service status table (non-zero exit if anything is down).
@@ -51,7 +51,7 @@ The default provider is **NVIDIA**. Choose:
   binary + a voice model and set `PIPER_BINARY` / `PIPER_MODEL_PATH`.
 - **Dummy** (`TTS_PROVIDER=dummy`): silent audio, for dev/testing offline.
 
-Synthesized audio is content-addressed and cached in MinIO, so identical
+Synthesized audio is content-addressed and cached in R2, so identical
 passages/voices are never re-billed; speed changes use client `playbackRate`.
 
 ## Frontend (Vercel)

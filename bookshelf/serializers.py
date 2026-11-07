@@ -109,9 +109,37 @@ class ReadingProgressSerializer(serializers.ModelSerializer):
         model = ReadingProgress
         fields = [
             "book", "segment_index", "char_offset", "chapter_index",
-            "page", "percent", "audio_ms", "updated_at",
+            "page", "percent", "locator", "audio_ms", "updated_at",
         ]
         read_only_fields = ["updated_at"]
+
+    def update(self, instance, validated_data):
+        # A bare segment_index write (the text reader / narration) makes any
+        # stored page locator stale, so drop it; the locator wins only when the
+        # same request supplies it.
+        if "segment_index" in validated_data and "locator" not in validated_data:
+            validated_data["locator"] = {}
+        if (
+            "percent" not in validated_data
+            and "segment_index" in validated_data
+            and instance.book.book_type == "document"
+        ):
+            total = max(1, instance.book.total_segments or 1)
+            validated_data["percent"] = round(
+                min(1.0, validated_data["segment_index"] / total) * 100, 2
+            )
+        return super().update(instance, validated_data)
+
+    def validate_percent(self, value):
+        return max(0.0, min(100.0, value))
+
+    def validate_locator(self, value):
+        # Opaque to the server, but bounded: this is client-supplied JSON.
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("locator must be an object.")
+        if len(str(value)) > 2000:
+            raise serializers.ValidationError("locator is too large.")
+        return value
 
 
 class BookmarkSerializer(serializers.ModelSerializer):

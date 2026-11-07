@@ -191,6 +191,11 @@ class ReadingProgress(models.Model):
     chapter_index = models.IntegerField(default=0)
     page = models.IntegerField(null=True, blank=True)
     percent = models.FloatField(default=0.0)
+    # Format-native position for the page view, so a reader resumes on the exact
+    # page rather than at a chapter start. EPUB: {"type": "epub", "cfi": "..."}
+    # (an EPUB CFI names the exact spot in the text). PDF: {"type": "pdf",
+    # "page": 12, "offset": 0.42} (offset = fraction scrolled down that page).
+    locator = models.JSONField(default=dict, blank=True)
     # For native audiobooks: position within the currently playing track.
     audio_ms = models.BigIntegerField(default=0)
     # Wall-clock milliseconds actually spent listening to this book. Only the

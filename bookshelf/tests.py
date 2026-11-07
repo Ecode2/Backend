@@ -951,3 +951,90 @@ class UploadFilenameTests(TestCase):
             )
         self.assertEqual(res.status_code, 400)
         self.assertIn("file", res.data)
+
+
+class ReadingPositionTests(TestCase):
+    """The resume position: locator handling and percent derivation."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from bookshelf.models import Book
+
+        self.user = User.objects.create_user("pos", password="pw12345!")
+        self.book = Book.objects.create(title="P", user=self.user, total_segments=200)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.url = f"/books/{self.book.id}/progress/"
+
+    def test_locator_roundtrips(self):
+        loc = {"type": "epub", "cfi": "epubcfi(/6/14!/4/2/10/1:42)"}
+        r = self.api.put(self.url, {"locator": loc, "percent": 31.5}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.api.get(self.url).json()["locator"], loc)
+
+    def test_bare_segment_write_drops_stale_locator(self):
+        # Text view / narration moved the playhead: an old page locator would
+        # otherwise drag the reader back to where they used to be.
+        self.api.put(self.url, {"locator": {"type": "pdf", "page": 3, "offset": 0.1}}, format="json")
+        r = self.api.put(self.url, {"segment_index": 50}, format="json")
+        self.assertEqual(r.json()["locator"], {})
+        self.assertEqual(r.json()["segment_index"], 50)
+        self.assertEqual(r.json()["percent"], 25.0)
+
+    def test_locator_with_segment_is_kept(self):
+        loc = {"type": "pdf", "page": 9, "offset": 0.5}
+        r = self.api.put(self.url, {"locator": loc, "segment_index": 40, "percent": 20}, format="json")
+        self.assertEqual(r.json()["locator"], loc)
+
+    def test_oversized_locator_rejected(self):
+        r = self.api.put(self.url, {"locator": {"cfi": "x" * 3000}}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+
+class ReadingNotOverwrittenByStaleSocketTests(TransactionTestCase):
+    """Opening the player (which connects the socket) must not clobber progress
+    saved over REST while the reader was only reading."""
+
+    async def test_disconnect_without_playing_keeps_rest_progress(self):
+        from channels.testing import WebsocketCommunicator
+        from channels.db import database_sync_to_async
+        from system.asgi import application
+        from bookshelf.models import Book, BookFile, ReadingProgress
+        from bookshelf.services import get_or_build_structure
+        from bookshelf.ws_auth import make_ws_ticket
+
+        @database_sync_to_async
+        def setup():
+            user = User.objects.create_user("stale", password="pw12345!")
+            book = Book.objects.create(title="T", user=user, status="public")
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                f.write("One.\n\nTwo.\n\nThree.\n\nFour.")
+                path = f.name
+            from django.core.files import File as DjangoFile
+            with open(path, "rb") as fh:
+                bf = BookFile(book=book)
+                bf.file.save("t.txt", DjangoFile(fh), save=True)
+            os.remove(path)
+            get_or_build_structure(bf)
+            ReadingProgress.objects.create(user=user, book=book, segment_index=0)
+            return user, book
+
+        user, book = await setup()
+        ticket = await database_sync_to_async(make_ws_ticket)(user)
+        comm = WebsocketCommunicator(application, f"/ws/reader/{book.id}/?ticket={ticket}")
+        await comm.connect()
+        await comm.receive_json_from()  # ready (resume at 0)
+
+        # The reader scrolls on and the browser saves over REST...
+        await database_sync_to_async(
+            lambda: ReadingProgress.objects.filter(user=user, book=book).update(
+                segment_index=3, locator={"type": "epub", "cfi": "c"}
+            )
+        )()
+        await comm.disconnect()
+
+        row = await database_sync_to_async(
+            lambda: ReadingProgress.objects.get(user=user, book=book)
+        )()
+        self.assertEqual(row.segment_index, 3)
+        self.assertEqual(row.locator, {"type": "epub", "cfi": "c"})

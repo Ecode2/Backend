@@ -1,6 +1,6 @@
 [Unit]
 Description=Bookverse ASGI (Gunicorn + Uvicorn worker; HTTP + WebSocket)
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service redis-server.service
 Wants=postgresql.service redis-server.service
 
 [Service]
@@ -10,9 +10,17 @@ WorkingDirectory=/opt/bookverse/app
 EnvironmentFile=/opt/bookverse/.env
 ExecStart=/opt/bookverse/venv/bin/gunicorn system.asgi:application \
   -k uvicorn.workers.UvicornWorker \
-  --workers 3 \
+  --workers 1 \
+  --max-requests 2000 --max-requests-jitter 200 \
   --bind unix:/run/bookverse/bookverse.sock \
   --timeout 120
+# Shared VPS (another service, a Telegram bot, lives here): cap what the API
+# can take so a runaway request can never starve it.
+MemoryHigh=350M
+MemoryMax=450M
+CPUWeight=50
+Nice=5
+TasksMax=200
 Restart=always
 RestartSec=3
 RuntimeDirectory=bookverse

@@ -3,7 +3,7 @@ Django settings for the Bookverse system project.
 
 Bookverse is an audiobook-style document reader: a single ASGI process
 (Gunicorn + UvicornWorker) serves both the DRF HTTP API and the Channels
-WebSocket audio stream. Object storage is S3-compatible (MinIO on the VPS).
+WebSocket audio stream. Object storage is S3-compatible (Cloudflare R2).
 """
 
 from datetime import timedelta
@@ -245,7 +245,7 @@ USE_TZ = True
 # Static + media (object storage)
 #
 # Static files are served by WhiteNoise. Media (uploaded books + synthesized
-# audio) lives in S3-compatible storage (MinIO). If no bucket is configured we
+# audio) lives in S3-compatible storage (Cloudflare R2). If no bucket is configured we
 # fall back to local filesystem so a bare checkout still runs.
 # ---------------------------------------------------------------------------
 STATIC_URL = "static/"
@@ -257,11 +257,24 @@ USE_S3 = bool(AWS_STORAGE_BUCKET_NAME)
 if USE_S3:
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")  # e.g. http://127.0.0.1:9000
-    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
-    AWS_S3_USE_SSL = env_bool("AWS_S3_USE_SSL", not DEBUG)
-    # MinIO requires path-style addressing (bucket in the path, not the host).
+    # Cloudflare R2: https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+    # (any S3-compatible endpoint works; leave unset for real AWS S3).
+    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
+    # R2 only accepts the region "auto" (us-east-1 is also tolerated).
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "auto")
+    AWS_S3_USE_SSL = env_bool("AWS_S3_USE_SSL", True)
+    # R2 requires SigV4 and path-style addressing.
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
     AWS_S3_ADDRESSING_STYLE = os.getenv("AWS_S3_ADDRESSING_STYLE", "path")
+    # boto3 >= 1.36 adds CRC checksums to every request, which R2 rejects on
+    # some operations; only send them when an operation requires it.
+    from botocore.config import Config as _BotoConfig
+
+    AWS_S3_CLIENT_CONFIG = _BotoConfig(
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
     # Public, time-limited URL for media when a custom domain is configured.
     AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN") or None
     AWS_QUERYSTRING_AUTH = env_bool("AWS_QUERYSTRING_AUTH", True)

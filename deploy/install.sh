@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ===========================================================================
 # Bookverse VPS provisioning (Debian 12 / Ubuntu). Idempotent: safe to re-run.
-# Provisions Postgres, Redis, MinIO, Nginx, the Python venv, systemd units and
+# Provisions Postgres, Redis, Nginx, the Python venv, systemd units and
 # the Nginx site. Never destructively recreates an existing database.
 # ===========================================================================
 set -euo pipefail
@@ -12,8 +12,6 @@ APP_DIR="${APP_HOME}/app"            # repository checkout lives here
 VENV_DIR="${APP_HOME}/venv"
 ENV_FILE="${APP_HOME}/.env"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # Backend/
-MINIO_USER="minio-user"
-MINIO_DATA="/var/lib/minio"
 
 log()  { echo -e "\033[1;34m[install]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[warn]\033[0m $*"; }
@@ -63,9 +61,9 @@ if [ ! -f "${ENV_FILE}" ]; then
   cp "${APP_DIR}/.env.example" "${ENV_FILE}"
   chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
-  warn "Edit ${ENV_FILE} (secrets, DB password, MinIO creds) then re-run."
-  # Stop here on the very first run. Continuing would provision Postgres and
-  # MinIO with the placeholder credentials from .env.example; because the rest
+  warn "Edit ${ENV_FILE} (secrets, DB password, R2 creds) then re-run."
+  # Stop here on the very first run. Continuing would provision Postgres
+  # with the placeholder credentials from .env.example; because the rest
   # of the script is idempotent it would then *skip* recreating them, leaving
   # the real passwords in .env permanently out of sync with the services.
   exit 1
@@ -111,47 +109,36 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_D
   sudo -u postgres psql -c "CREATE DATABASE ${PG_DB} OWNER ${PG_USER};"
 fi
 
-# --- 6. MinIO ---------------------------------------------------------------
-if [ ! -x /usr/local/bin/minio ]; then
-  log "Installing MinIO server + client..."
-  ARCH="$(dpkg --print-architecture)"; [ "${ARCH}" = "armhf" ] && ARCH="arm"
-  curl -fsSL "https://dl.min.io/server/minio/release/linux-${ARCH}/minio" -o /usr/local/bin/minio
-  curl -fsSL "https://dl.min.io/client/mc/release/linux-${ARCH}/mc" -o /usr/local/bin/mc
-  chmod +x /usr/local/bin/minio /usr/local/bin/mc
-fi
-id "${MINIO_USER}" >/dev/null 2>&1 || adduser --system --group --no-create-home "${MINIO_USER}"
-mkdir -p "${MINIO_DATA}"
-chown -R "${MINIO_USER}:${MINIO_USER}" "${MINIO_DATA}"
-# Regenerated every run (same reason as the Postgres role above): .env is the
-# single source of truth, so editing credentials there must actually reach the
-# running service instead of being ignored because the file already exists.
-MINIO_TMP="$(mktemp)"
-cat > "${MINIO_TMP}" <<EOF
-MINIO_VOLUMES="${MINIO_DATA}"
-MINIO_ADDRESS=":9000"
-MINIO_CONSOLE_ADDRESS=":9001"
-MINIO_ROOT_USER="${MINIO_ROOT_USER:-bookverse}"
-MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-changemechangeme}"
-EOF
-MINIO_CREDS_CHANGED=0
-if ! cmp -s "${MINIO_TMP}" /etc/default/minio; then
-  log "Writing /etc/default/minio from ${ENV_FILE}"
-  install -m 600 "${MINIO_TMP}" /etc/default/minio
-  MINIO_CREDS_CHANGED=1
-fi
-rm -f "${MINIO_TMP}"
+# --- 6. Resource limits (shared VPS) -----------------------------------------
+# Redis only holds the cache + channel layer: cap it and never persist to disk.
+log "Capping Redis memory..."
+REDIS_CONF=/etc/redis/redis.conf
+set_redis() {  # set_redis <key> <value>
+  if grep -qE "^$1[[:space:]]" "${REDIS_CONF}"; then
+    sed -i -E "s|^$1[[:space:]].*|$1 $2|" "${REDIS_CONF}"
+  else
+    echo "$1 $2" >> "${REDIS_CONF}"
+  fi
+}
+set_redis maxmemory 64mb
+set_redis maxmemory-policy allkeys-lru
+set_redis save '""'
+systemctl restart redis-server
 
-install -m 644 "${APP_DIR}/deploy/systemd/minio.service" /etc/systemd/system/minio.service
-systemctl daemon-reload
-systemctl enable --now minio
-if [ "${MINIO_CREDS_CHANGED}" -eq 1 ]; then
-  log "MinIO config changed — restarting"
-  systemctl restart minio
+# Postgres: small footprint, plenty for this app. Own file, safe to rewrite.
+PG_CONF_DIR="$(ls -d /etc/postgresql/*/main/conf.d 2>/dev/null | head -n1 || true)"
+if [ -n "${PG_CONF_DIR}" ]; then
+  log "Tuning Postgres for a shared host..."
+  cat > "${PG_CONF_DIR}/bookverse-lowmem.conf" <<'PGEOF'
+# Managed by deploy/install.sh
+shared_buffers = 64MB
+work_mem = 4MB
+maintenance_work_mem = 32MB
+effective_cache_size = 256MB
+max_connections = 30
+PGEOF
+  systemctl restart postgresql
 fi
-sleep 3
-# Create the bucket via mc (idempotent).
-mc alias set bvlocal "http://127.0.0.1:9000" "${MINIO_ROOT_USER:-bookverse}" "${MINIO_ROOT_PASSWORD:-changemechangeme}" >/dev/null 2>&1 || true
-mc mb --ignore-existing "bvlocal/${AWS_STORAGE_BUCKET_NAME:-bookverse}" >/dev/null 2>&1 || true
 
 # --- 7. Python venv + deps --------------------------------------------------
 # Django 5.2 LTS supports Python 3.10-3.14, so the distro python3 is fine on

@@ -34,6 +34,11 @@ class ReaderConsumer(AsyncWebsocketConsumer):
         self.user = self.scope.get("user")
         self.play_task: asyncio.Task | None = None
         self.position = 0
+        # True only once narration has actually moved the playhead. Without this
+        # guard every disconnect re-saved the position read at connect time, and
+        # silently overwrote progress the REST endpoint saved while the reader
+        # was just reading (page view / scrolling) -- reverting to an old spot.
+        self.moved = False
         self.voice = getattr(settings, "TTS_DEFAULT_VOICE", "en-US-Neural2-F")
         self.language = getattr(settings, "TTS_DEFAULT_LANGUAGE", "en-US")
         self.segments: list[dict] = []
@@ -93,7 +98,8 @@ class ReaderConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, code):
         await self._cancel_play()
-        await self._save_progress(self.position)
+        if self.moved:
+            await self._save_progress(self.position)
 
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data:
@@ -122,12 +128,14 @@ class ReaderConsumer(AsyncWebsocketConsumer):
 
     async def _action_pause(self, msg):
         await self._cancel_play()
-        await self._save_progress(self.position)
+        if self.moved:
+            await self._save_progress(self.position)
         await self._send_json({"type": "paused", "segment_index": self.position})
 
     async def _action_stop(self, msg):
         await self._cancel_play()
-        await self._save_progress(self.position)
+        if self.moved:
+            await self._save_progress(self.position)
         await self._send_json({"type": "stopped", "segment_index": self.position})
 
     async def _action_seek(self, msg):
@@ -170,6 +178,7 @@ class ReaderConsumer(AsyncWebsocketConsumer):
         await self._cancel_play()
         start_index = max(0, min(start_index, max(0, len(self.segments) - 1)))
         self.position = start_index
+        self.moved = True
         self.play_task = asyncio.create_task(self._stream_from(start_index))
 
     async def _cancel_play(self):
@@ -343,6 +352,8 @@ class ReaderConsumer(AsyncWebsocketConsumer):
                 "page": seg.get("page") if seg else None,
                 "percent": round(min(1.0, segment_index / total) * 100, 2),
                 "audio_ms": audio_ms,
+                # Narration moved the playhead, so any page-view locator is stale.
+                "locator": {},
             },
         )
 

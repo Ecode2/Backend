@@ -23,15 +23,54 @@ class UserSerializer(serializers.ModelSerializer):
         extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ['id']
 
+    def validate_email(self, value):
+        value = value.strip().lower()
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
+    def validate_username(self, value):
+        value = value.strip()
+        qs = User.objects.filter(username__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This username is taken.")
+        return value
+
+    def validate(self, attrs):
+        # Run Django's configured password rules (length, common, numeric...).
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        if "password" not in attrs:  # partial profile update, no password change
+            return attrs
+        candidate = self.instance or User(
+            username=attrs.get("username", ""), email=attrs.get("email", "")
+        )
+        try:
+            validate_password(attrs["password"], user=candidate)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)})
+        return attrs
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        instance = super().update(instance, validated_data)
+        if password:
+            instance.set_password(password)  # never store the raw value
+            instance.save(update_fields=["password"])
+        return instance
+
     def create(self, validated_data):
-        user = get_user_model().objects.create_user(
+        return get_user_model().objects.create_user(
             username=validated_data["username"],
             email=validated_data["email"],
-            password=validated_data["password"]
+            password=validated_data["password"],
         )
-        return user
-    
-
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -42,20 +81,23 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        try:
-            user = User.objects.get(email=attrs['username'])
-        except User.DoesNotExist:
-            raise serializers.ValidationError('No user with this email found.')
+        # One generic message for "no such user" and "wrong password": telling
+        # them apart lets anyone probe which emails have accounts. Email is
+        # matched case-insensitively and a duplicate can no longer 500.
+        identifier = (attrs.get("username") or "").strip()
+        user = (
+            User.objects.filter(email__iexact=identifier).first()
+            or User.objects.filter(username__iexact=identifier).first()
+        )
+        if user is None or not user.check_password(attrs.get("password", "")):
+            raise serializers.ValidationError(
+                {"detail": "Incorrect email or password."}
+            )
 
-        if not user.check_password(attrs['password']):
-            raise serializers.ValidationError('Incorrect password.')
-
-        # Include default behaviour
         attrs["username"] = user.username
         data = super().validate(attrs)
-        
-        # Update last login
+
         if api_settings.UPDATE_LAST_LOGIN:
             update_last_login(None, user)
-        
+
         return data
